@@ -1,0 +1,618 @@
+<title>Ingest Loop Runbook</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+
+<style>
+:root {
+  --ground:    #FBFCFD;
+  --surface:   #F1F5F8;
+  --surface-2: #E5ECF2;
+  --ink:       #131A22;
+  --ink-soft:  #33414F;
+  --muted:     #5C6B7A;
+  --rule:      #D3DEE7;
+  --accent:    #0E7C86;
+  --accent-dim:#DCEEF0;
+  --ok:        #2F7D53;
+  --ok-bg:     #E3F2E9;
+  --warn:      #8A5A0C;
+  --warn-bg:   #F8EEDB;
+  --crit:      #A33A32;
+  --crit-bg:   #F8E5E3;
+  --shadow:    0 1px 2px rgba(19,26,34,.05), 0 8px 24px -12px rgba(19,26,34,.12);
+
+  --f-display: Archivo, "Helvetica Neue", Arial, sans-serif;
+  --f-body:    "IBM Plex Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --f-mono:    "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --ground:    #10151C;
+    --surface:   #171E27;
+    --surface-2: #1F2833;
+    --ink:       #E4EAF0;
+    --ink-soft:  #C2CDD8;
+    --muted:     #8A99A8;
+    --rule:      #2A3542;
+    --accent:    #3FBFC9;
+    --accent-dim:#132B31;
+    --ok:        #4FBF80;
+    --ok-bg:     #12271C;
+    --warn:      #E0A04A;
+    --warn-bg:   #2B2113;
+    --crit:      #E8736A;
+    --crit-bg:   #2E1917;
+    --shadow:    0 1px 2px rgba(0,0,0,.3), 0 8px 24px -12px rgba(0,0,0,.5);
+  }
+}
+
+:root[data-theme="dark"] {
+  --ground:    #10151C;
+  --surface:   #171E27;
+  --surface-2: #1F2833;
+  --ink:       #E4EAF0;
+  --ink-soft:  #C2CDD8;
+  --muted:     #8A99A8;
+  --rule:      #2A3542;
+  --accent:    #3FBFC9;
+  --accent-dim:#132B31;
+  --ok:        #4FBF80;
+  --ok-bg:     #12271C;
+  --warn:      #E0A04A;
+  --warn-bg:   #2B2113;
+  --crit:      #E8736A;
+  --crit-bg:   #2E1917;
+  --shadow:    0 1px 2px rgba(0,0,0,.3), 0 8px 24px -12px rgba(0,0,0,.5);
+}
+
+* { box-sizing: border-box; }
+
+body {
+  background: var(--ground);
+  color: var(--ink);
+  font-family: var(--f-body);
+  font-size: 16.5px;
+  line-height: 1.62;
+  margin: 0;
+  padding: 0 1.25rem 6rem;
+  -webkit-font-smoothing: antialiased;
+}
+
+.wrap { max-width: 60rem; margin: 0 auto; }
+
+/* ---------- masthead ---------- */
+
+.masthead {
+  padding: 4.5rem 0 2.25rem;
+  border-bottom: 2px solid var(--ink);
+  margin-bottom: 2.5rem;
+}
+.eyebrow {
+  font-family: var(--f-mono);
+  font-size: .74rem;
+  font-weight: 500;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  color: var(--accent);
+  margin: 0 0 1rem;
+}
+h1 {
+  font-family: var(--f-display);
+  font-weight: 700;
+  font-size: clamp(2.1rem, 5.5vw, 3.2rem);
+  line-height: 1.04;
+  letter-spacing: -.025em;
+  text-wrap: balance;
+  margin: 0 0 .85rem;
+}
+.standfirst {
+  font-size: 1.1rem;
+  color: var(--ink-soft);
+  max-width: 46ch;
+  margin: 0;
+}
+
+/* ---------- the warning that matters most ---------- */
+
+.klaxon {
+  background: var(--warn-bg);
+  border: 1px solid color-mix(in srgb, var(--warn) 35%, transparent);
+  border-radius: 4px;
+  padding: 1.4rem 1.5rem;
+  margin: 0 0 3.5rem;
+  display: grid;
+  gap: .7rem;
+}
+.klaxon h2 {
+  font-family: var(--f-display);
+  font-size: 1.05rem;
+  font-weight: 700;
+  letter-spacing: -.01em;
+  margin: 0;
+  color: var(--warn);
+}
+.klaxon p { margin: 0; color: var(--ink-soft); }
+.klaxon code { background: color-mix(in srgb, var(--warn) 14%, transparent); }
+
+/* ---------- typography ---------- */
+
+h2.section {
+  font-family: var(--f-display);
+  font-weight: 700;
+  font-size: 1.6rem;
+  letter-spacing: -.02em;
+  text-wrap: balance;
+  margin: 4rem 0 1.25rem;
+  padding-bottom: .5rem;
+  border-bottom: 1px solid var(--rule);
+}
+h3 {
+  font-family: var(--f-display);
+  font-weight: 600;
+  font-size: 1.08rem;
+  letter-spacing: -.008em;
+  margin: 2.25rem 0 .6rem;
+}
+p { margin: 0 0 1.05rem; max-width: 68ch; }
+ul, ol { max-width: 68ch; padding-left: 1.3rem; }
+li { margin-bottom: .5rem; }
+strong { font-weight: 600; }
+a { color: var(--accent); text-decoration-thickness: 1px; text-underline-offset: 2px; }
+a:focus-visible, summary:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+  border-radius: 2px;
+}
+
+code {
+  font-family: var(--f-mono);
+  font-size: .86em;
+  background: var(--surface-2);
+  padding: .12em .38em;
+  border-radius: 3px;
+}
+
+/* ---------- steps ---------- */
+
+.step {
+  display: grid;
+  grid-template-columns: 3.25rem 1fr;
+  gap: 0 1.4rem;
+  margin: 0 0 3rem;
+}
+.step-num {
+  font-family: var(--f-mono);
+  font-size: .82rem;
+  font-weight: 600;
+  color: var(--accent);
+  padding-top: .55rem;
+  border-top: 2px solid var(--accent);
+  letter-spacing: .04em;
+}
+.step-body { min-width: 0; }
+.step-body > h2 {
+  font-family: var(--f-display);
+  font-weight: 700;
+  font-size: 1.42rem;
+  letter-spacing: -.02em;
+  text-wrap: balance;
+  margin: 0 0 .8rem;
+  padding-top: .35rem;
+}
+@media (max-width: 33rem) {
+  .step { grid-template-columns: 1fr; gap: .5rem; }
+  .step-num { border-top: none; padding-top: 0; }
+}
+
+/* ---------- code ---------- */
+
+.code {
+  background: var(--surface);
+  border: 1px solid var(--rule);
+  border-left: 2px solid var(--accent);
+  border-radius: 3px;
+  margin: 0 0 1.15rem;
+  overflow-x: auto;
+}
+.code pre {
+  font-family: var(--f-mono);
+  font-size: .845rem;
+  line-height: 1.68;
+  margin: 0;
+  padding: .95rem 1.15rem;
+  white-space: pre;
+}
+.code.out { border-left-color: var(--muted); }
+.code.out pre { color: var(--ink-soft); }
+.cm { color: var(--muted); }
+.ok { color: var(--ok); font-weight: 500; }
+
+.lane {
+  display: inline-block;
+  font-family: var(--f-mono);
+  font-size: .66rem;
+  font-weight: 600;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  padding: .18em .5em;
+  border-radius: 2px;
+  margin: 0 0 .45rem;
+  background: var(--accent-dim);
+  color: var(--accent);
+}
+.lane.docker { background: var(--surface-2); color: var(--muted); }
+
+/* ---------- tables ---------- */
+
+.scroll { overflow-x: auto; margin: 0 0 1.4rem; }
+table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: .93rem;
+  min-width: 34rem;
+}
+th {
+  font-family: var(--f-display);
+  font-weight: 600;
+  font-size: .78rem;
+  letter-spacing: .07em;
+  text-transform: uppercase;
+  text-align: left;
+  color: var(--muted);
+  padding: 0 1rem .6rem 0;
+  border-bottom: 1px solid var(--ink);
+  white-space: nowrap;
+}
+td {
+  padding: .75rem 1rem .75rem 0;
+  border-bottom: 1px solid var(--rule);
+  vertical-align: top;
+  color: var(--ink-soft);
+}
+td:first-child { color: var(--ink); }
+td code, th code { font-size: .82em; }
+table.compare td:first-child { font-weight: 500; }
+
+.chip {
+  display: inline-block;
+  font-family: var(--f-mono);
+  font-size: .74rem;
+  font-weight: 500;
+  padding: .1em .45em;
+  border-radius: 2px;
+  white-space: nowrap;
+}
+.chip.c-ok   { background: var(--ok-bg);   color: var(--ok); }
+.chip.c-warn { background: var(--warn-bg); color: var(--warn); }
+.chip.c-crit { background: var(--crit-bg); color: var(--crit); }
+
+/* ---------- notes ---------- */
+
+.note {
+  border-left: 2px solid var(--rule);
+  padding: .1rem 0 .1rem 1.15rem;
+  margin: 0 0 1.2rem;
+  color: var(--ink-soft);
+  max-width: 66ch;
+}
+.note p:last-child { margin-bottom: 0; }
+.note.keyed { border-left-color: var(--accent); }
+
+footer {
+  margin-top: 5rem;
+  padding-top: 1.5rem;
+  border-top: 1px solid var(--rule);
+  font-size: .87rem;
+  color: var(--muted);
+}
+footer p { max-width: 68ch; }
+</style>
+
+<div class="wrap">
+
+<header class="masthead">
+  <p class="eyebrow">llm-observe / apps/api</p>
+  <h1>Ingest Loop Runbook</h1>
+  <p class="standfirst">Run the API, point the <code>llmobserve</code> SDK at it, and confirm a trace lands in Postgres.</p>
+</header>
+
+<div class="klaxon">
+  <h2>The SDK fails silently by design</h2>
+  <p>If delivery fails, your program still runs and returns normally. A rejected batch looks exactly like a working one, and the only symptom is an empty database. Before anything else:</p>
+  <div class="code"><pre>export LLMOBSERVE_DEBUG=1</pre></div>
+</div>
+
+<h2 class="section">Two ways to run</h2>
+
+<div class="scroll">
+<table class="compare">
+  <thead><tr><th></th><th>Docker</th><th>Local (<code>make venv</code>)</th></tr></thead>
+  <tbody>
+    <tr><td>Docker daemon</td><td>required</td><td>not needed</td></tr>
+    <tr><td>Python</td><td>in the image</td><td>3.12, fetched by <code>uv</code></td></tr>
+    <tr><td>Database</td><td>local Postgres container, or Supabase</td><td>Supabase</td></tr>
+    <tr><td>Use when</td><td>testing the image, or you want local Postgres</td><td>day-to-day development</td></tr>
+  </tbody>
+</table>
+</div>
+
+<p>The local path exists because the API needs Python 3.11+ and this machine's system interpreter is 3.10. <code>uv</code> fetches a standalone one rather than requiring a system upgrade. Each step below shows the local path first, with the Docker equivalent alongside.</p>
+
+<h2 class="section">The loop</h2>
+
+<div class="step">
+  <div class="step-num">01</div>
+  <div class="step-body">
+    <h2>Set up <code>.env</code></h2>
+    <div class="code"><pre>cp .env.example .env</pre></div>
+    <p>Two variables matter here:</p>
+    <ul>
+      <li><code>DATABASE_URL</code> — the <strong>restricted</strong> role the API connects as. Must not be an admin role; see step 4.</li>
+      <li><code>SUPABASE_MIGRATION_URL</code> — the <strong>owner</strong> connection, used only by Alembic and <code>create_project.py</code>.</li>
+    </ul>
+    <div class="note keyed">
+      <p>Passwords are URL-encoded. An unencoded <code>@</code> does not error — it truncates the password at the first <code>@</code> and folds the remainder into the hostname, surfacing later as a confusing DNS or auth failure. Generate alphanumeric passwords and the problem cannot arise.</p>
+    </div>
+    <div class="code"><pre>openssl rand -base64 32 | tr -dc 'A-Za-z0-9' | head -c 32</pre></div>
+  </div>
+</div>
+
+<div class="step">
+  <div class="step-num">02</div>
+  <div class="step-body">
+    <h2>Build the local toolchain</h2>
+    <span class="lane">local</span>
+    <div class="code"><pre>make venv          <span class="cm"># uv installs Python 3.12 into apps/api/.venv</span></pre></div>
+    <p>One-off, about a minute, gitignored. Skip entirely if you are using Docker.</p>
+  </div>
+</div>
+
+<div class="step">
+  <div class="step-num">03</div>
+  <div class="step-body">
+    <h2>Apply migrations</h2>
+    <span class="lane">local</span>
+    <div class="code"><pre>make local-migrate</pre></div>
+    <span class="lane docker">docker</span>
+    <div class="code"><pre>make migrate           <span class="cm"># local Postgres container</span>
+make migrate-remote    <span class="cm"># Supabase</span></pre></div>
+    <p>New Supabase project? Two things must happen <strong>before</strong> the first migration:</p>
+    <ol>
+      <li>Run <code>infra/supabase/01_bootstrap_app_role.sql</code> in the SQL Editor, substituting a generated password for both placeholders. Migration <code>0001</code> grants privileges to <code>llmobserve_app</code> and fails if the role does not exist.</li>
+      <li>Enable <code>pg_cron</code> under Database → Extensions, so migration <code>0002</code> can schedule daily partition maintenance. Without it that migration is a deliberate no-op, and <code>ensure_observations_partitions(30, 8)</code> must be called from somewhere else.</li>
+    </ol>
+  </div>
+</div>
+
+<div class="step">
+  <div class="step-num">04</div>
+  <div class="step-body">
+    <h2>Confirm tenant isolation is real</h2>
+    <p>This is the step people skip, and the one that matters.</p>
+    <div class="code"><pre>curl -s http://127.0.0.1:8000/readyz</pre></div>
+    <div class="code out"><pre><span class="ok">{"status":"ready"}</span></pre></div>
+    <div class="note keyed">
+      <p><code>/readyz</code> fails if the runtime role can bypass row-level security. That failure is otherwise <strong>completely silent</strong>: every policy can be correctly defined and enforce nothing, while queries succeed and data comes back looking fine. The realistic way to get there is pasting the connection string Supabase offers by default — its <code>postgres</code> role has <code>rolbypassrls = true</code>.</p>
+    </div>
+    <p>Under Docker there is also <code>make check-rls</code>. Or check directly:</p>
+    <div class="code"><pre>SELECT rolname, rolsuper, rolbypassrls FROM pg_roles
+WHERE rolname IN ('postgres', 'llmobserve_app');
+<span class="cm">-- llmobserve_app MUST be  f | f</span></pre></div>
+  </div>
+</div>
+
+<div class="step">
+  <div class="step-num">05</div>
+  <div class="step-body">
+    <h2>Issue an API key</h2>
+    <div class="code"><pre>make key NAME=my-app</pre></div>
+    <div class="code out"><pre>project    my-app
+project_id d29c8ca0-2915-456b-8433-e04116404cb9
+api_key    llmo_sk_tkZV_bY1VD41Q421hQbEJA1dEm48AIWK_d40kuGbYwg</pre></div>
+    <p><strong>Shown once.</strong> Only a SHA-256 hash is stored, so a dump of <code>projects</code> cannot be replayed against the API — and a lost key cannot be recovered, only reissued with <code>--replace</code>, which deletes that project's traces.</p>
+    <p>This needs the owner connection because <code>projects</code> sits deliberately outside RLS — authentication has to resolve a key before any tenant is known — and the application role holds <code>SELECT</code> on it and nothing else.</p>
+  </div>
+</div>
+
+<div class="step">
+  <div class="step-num">06</div>
+  <div class="step-body">
+    <h2>Start the API</h2>
+    <span class="lane">local</span>
+    <div class="code"><pre>make serve             <span class="cm"># foreground, --reload</span></pre></div>
+    <span class="lane docker">docker</span>
+    <div class="code"><pre>make dev               <span class="cm"># + local Postgres</span>
+make dev-supabase      <span class="cm"># API only, against Supabase</span></pre></div>
+    <div class="code"><pre>curl -s http://127.0.0.1:8000/healthz   <span class="cm"># liveness, never touches the DB</span>
+curl -s http://127.0.0.1:8000/readyz    <span class="cm"># DB reachable + RLS enforced</span>
+open      http://127.0.0.1:8000/docs    <span class="cm"># interactive OpenAPI</span></pre></div>
+  </div>
+</div>
+
+<div class="step">
+  <div class="step-num">07</div>
+  <div class="step-body">
+    <h2>Point the SDK at it</h2>
+    <div class="code"><pre>export LLMOBSERVE_API_KEY=llmo_sk_...   <span class="cm"># from step 5</span>
+export LLMOBSERVE_HOST=http://127.0.0.1:8000
+export LLMOBSERVE_DEBUG=1</pre></div>
+    <div class="code"><pre>import time
+
+import llmobserve
+from llmobserve import observe
+
+@observe(as_type="generation", name="chat")
+def chat(prompt: str) -> str:
+    time.sleep(0.05)          <span class="cm"># stand-in for a real call</span>
+    return f"echo: {prompt}"
+
+@observe(name="request")
+def request(prompt: str) -> str:
+    return chat(prompt)
+
+request("hello")
+llmobserve.flush()            <span class="cm"># buffer is async — flush before exit</span>
+llmobserve.shutdown()</pre></div>
+    <div class="note">
+      <p><code>flush()</code> matters. The SDK buffers and delivers on a background thread, so a short script can exit before anything is sent. For faster feedback while testing, <code>llmobserve.configure(flush_at=1, flush_interval=0.5)</code> sends each event immediately instead of waiting for a full batch.</p>
+    </div>
+    <p>Clean output means delivery succeeded. Anything else looks like:</p>
+    <div class="code out"><pre>llmobserve: dropped 1 event(s): HTTP 422</pre></div>
+  </div>
+</div>
+
+<div class="step">
+  <div class="step-num">08</div>
+  <div class="step-body">
+    <h2>Confirm it landed</h2>
+    <p>Server side you should see <span class="chip c-ok">202 Accepted</span> per batch. Then:</p>
+    <div class="code"><pre>SELECT p.name AS project, t.name AS trace, o.name AS observation,
+       o.type, o.level, o.latency_ms, o.total_tokens, o.cost_usd,
+       o.tableoid::regclass AS partition
+FROM projects p
+JOIN traces t ON t.project_id = p.id
+LEFT JOIN observations o ON o.trace_id = t.id
+WHERE p.name = 'my-app'
+ORDER BY o.started_at;</pre></div>
+    <div class="code out"><pre> project |  trace  | observation |    type    | level | latency_ms | total_tokens | cost_usd |       partition
+---------+---------+-------------+------------+-------+------------+--------------+----------+------------------------
+ my-app  | request | request     | span       | ok    |         50 |            0 |          | observations_p20260818
+ my-app  | request | chat        | generation | ok    |         50 |            0 |          | observations_p20260818</pre></div>
+    <p>Three things worth checking in that output:</p>
+    <ul>
+      <li><strong><code>partition</code> is <code>observations_pYYYYMMDD</code>, not <code>observations_default</code>.</strong> A row in the default partition permanently costs that day its partition — the maintenance function skips any day whose rows are already stranded, so every later write for that day also lands in DEFAULT and stops being pruned.</li>
+      <li><strong><code>level</code> is <code>ok</code>.</strong> That is the SDK's <code>status</code> field; <code>error</code> means the decorated function raised.</li>
+      <li><strong><code>cost_usd</code> is null above, and that is correct here.</strong> The toy <code>chat()</code> reports no model and no token counts, so there is no basis for a cost. Null means unknown, never free. Instrument a real provider call and it fills in.</li>
+    </ul>
+  </div>
+</div>
+
+<h2 class="section">Troubleshooting</h2>
+
+<p>Every failure mode here is quiet. That is why the table exists.</p>
+
+<div class="scroll">
+<table>
+  <thead><tr><th>Symptom</th><th>Cause</th><th>Fix</th></tr></thead>
+  <tbody>
+    <tr>
+      <td>No output at all, empty database</td>
+      <td><code>LLMOBSERVE_DEBUG</code> unset</td>
+      <td>Set it. The SDK never raises on delivery failure.</td>
+    </tr>
+    <tr>
+      <td><span class="chip c-crit">401</span> in the drop message</td>
+      <td>Key not recognised</td>
+      <td>Reissue with <code>make key</code>. 401 is deliberately identical for a missing header, wrong scheme, and unknown key.</td>
+    </tr>
+    <tr>
+      <td><span class="chip c-warn">422</span> mentioning <code>traces</code>/<code>events</code></td>
+      <td>Envelope not recognised</td>
+      <td>The body must carry <code>events</code> or <code>traces</code>. This one is intentional — see below.</td>
+    </tr>
+    <tr>
+      <td><span class="chip c-warn">422</span> on a specific field</td>
+      <td>Type mismatch</td>
+      <td>Read <code>loc</code> in the response body; it names the exact field.</td>
+    </tr>
+    <tr>
+      <td><span class="chip c-warn">413</span></td>
+      <td>Batch too large</td>
+      <td>Lower <code>flush_at</code>, or raise <code>INGEST_MAX_OBSERVATIONS_PER_BATCH</code>.</td>
+    </tr>
+    <tr>
+      <td><span class="chip c-ok">202</span> but nothing stored</td>
+      <td>Wrong project, or observations rejected</td>
+      <td>Check <code>rejected_observations</code> in the response body.</td>
+    </tr>
+    <tr>
+      <td><code>rejected_observations &gt; 0</code></td>
+      <td>Timestamp outside the accepted window</td>
+      <td>Client clock skew. Retrying cannot help — the event only ages further out of range.</td>
+    </tr>
+    <tr>
+      <td>Rows visible across projects</td>
+      <td>Runtime role bypasses RLS</td>
+      <td><code>DATABASE_URL</code> points at an admin role. <code>/readyz</code> catches this.</td>
+    </tr>
+    <tr>
+      <td>Script exits, nothing sent</td>
+      <td>No <code>flush()</code></td>
+      <td>Call <code>llmobserve.flush()</code> before exit.</td>
+    </tr>
+  </tbody>
+</table>
+</div>
+
+<h3>Why an unrecognised envelope is a 422</h3>
+<p>Everything else here is lenient — unknown <em>fields</em> are ignored so a newer SDK can send keys this server has never heard of. But a body carrying none of <code>events</code> / <code>traces</code> / <code>observations</code> is rejected outright, because the alternative is <span class="chip c-ok">202</span> with a count of zero on every batch: success reported while nothing is stored. An empty <code>{"events": []}</code> is fine; the key itself is not optional.</p>
+
+<h2 class="section">The wire contract</h2>
+
+<p><code>/v1/ingest</code> accepts two envelopes. The SDK sends the first.</p>
+
+<div class="code"><pre><span class="cm">// Flat — one stream, discriminated by `type`</span>
+{"events": [
+  {"id": "…", "type": "trace", "name": "request", "start_time": "…"},
+  {"id": "…", "type": "generation", "trace_id": "…", "parent_id": "…", "status": "ok"}
+]}
+
+<span class="cm">// Nested — observations carried inside their trace</span>
+{"traces": [
+  {"id": "…", "name": "request", "observations": [{"id": "…", "type": "generation"}]}
+]}</pre></div>
+
+<p>The flat form suits a buffering client: spans finish independently and flush in whatever order they complete. Requiring the nesting would force the SDK to hold a trace open until its last child returned, so a long-running trace could not be reported until it ended.</p>
+
+<h3>Field mappings that are easy to miss</h3>
+
+<div class="scroll">
+<table>
+  <thead><tr><th>SDK sends</th><th>Stored as</th></tr></thead>
+  <tbody>
+    <tr><td><code>status</code> (<code>"ok"</code> / <code>"error"</code>)</td><td><code>level</code></td></tr>
+    <tr><td><code>parent_id</code></td><td><code>parent_observation_id</code></td></tr>
+    <tr><td><code>start_time</code> / <code>end_time</code></td><td><code>started_at</code> / <code>ended_at</code></td></tr>
+    <tr><td><code>input_tokens</code>, <code>gen_ai.usage.input_tokens</code></td><td><code>prompt_tokens</code></td></tr>
+    <tr><td><code>latency_ms: 50.4779…</code></td><td>rounded to <code>50</code></td></tr>
+  </tbody>
+</table>
+</div>
+
+<p>Numeric fields accept any JSON number and are stored as rounded non-negative integers. <code>openapi.json</code> publishes them as <code>number</code> rather than <code>integer</code> for exactly this reason — the SDK times spans with <code>perf_counter</code> and legitimately sends fractional milliseconds.</p>
+
+<div class="note keyed">
+  <p><code>cost_usd</code> is <strong>never</strong> read from the payload. It is computed server-side at write time from the token counts and the pricebook in <code>app/services/pricing.py</code>, then frozen. A client that sends <code>cost_usd</code> has it silently dropped.</p>
+</div>
+
+<h3>Idempotency requires a client timestamp</h3>
+<p>Retries are safe <strong>when the SDK sends <code>start_time</code></strong>. The observations primary key is <code>(project_id, id, started_at)</code> — Postgres requires the partition key in every unique constraint — so an observation sent without a timestamp gets a server-stamped one, and a retry becomes a genuinely different row. The SDK sets <code>start_time</code> on every event, so this only bites hand-rolled clients.</p>
+
+<h2 class="section">Automated tests</h2>
+
+<div class="code"><pre>make local-test                                   <span class="cm"># all 77</span>
+make local-test ARGS="tests/test_ingest.py -q"    <span class="cm"># one file</span>
+make test                                         <span class="cm"># Docker equivalent</span></pre></div>
+
+<div class="scroll">
+<table>
+  <thead><tr><th>File</th><th>Covers</th></tr></thead>
+  <tbody>
+    <tr><td><code>test_pricing.py</code></td><td>Pricebook resolution and cost arithmetic. No database.</td></tr>
+    <tr><td><code>test_ingest.py</code></td><td>Round trip, idempotency, out-of-order delivery, partition window, envelopes.</td></tr>
+    <tr><td><code>test_tenant_isolation.py</code></td><td>Project A cannot read project B's traces.</td></tr>
+  </tbody>
+</table>
+</div>
+
+<p>These run against a <strong>real</strong> Postgres, deliberately — the isolation property is enforced by row-level security, so a mock or SQLite would assert nothing. Each test creates its own projects and deletes them afterwards.</p>
+
+<p><code>make local-test</code> takes roughly 100 seconds against Supabase, essentially all network round trips. Against a local Postgres container it is much faster.</p>
+
+<footer>
+  <p>Source of truth: <code>docs/testing-with-the-sdk.md</code> in the repository. The SDK lives in the separate <code>llmobserve-python</code> repo and is versioned independently — CI publishes <code>openapi.json</code> as the contract between them.</p>
+</footer>
+
+</div>

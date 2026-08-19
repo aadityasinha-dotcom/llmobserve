@@ -1,0 +1,87 @@
+name: llm-observe
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-llmobserve}
+      # Consumed by infra/postgres/init/01-app-role.sh to create the
+      # non-superuser role the API connects as. RLS is bypassed by
+      # superusers, so the API must never connect as POSTGRES_USER.
+      APP_DB_USER: ${APP_DB_USER:-llmobserve_app}
+      APP_DB_PASSWORD: ${APP_DB_PASSWORD:-llmobserve_app}
+    ports:
+      # localhost only - never expose the database on 0.0.0.0
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./infra/postgres/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-llmobserve}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes", "--save", "60", "1"]
+    ports:
+      - "127.0.0.1:${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+
+  api:
+    build:
+      context: ./apps/api
+      dockerfile: Dockerfile
+      target: dev
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      # Default to the local container, but let .env win. Composing the URL here
+      # rather than in .env keeps the local target working with nothing but
+      # POSTGRES_* set; setting DATABASE_URL in .env (the Supabase case)
+      # overrides it. `postgres` is the compose service name, so these defaults
+      # only resolve inside this network.
+      #
+      # The app runs as the restricted role; migrations run as the owner.
+      DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://${APP_DB_USER:-llmobserve_app}:${APP_DB_PASSWORD:-llmobserve_app}@postgres:5432/${POSTGRES_DB:-llmobserve}}
+      MIGRATION_DATABASE_URL: ${MIGRATION_DATABASE_URL:-postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-llmobserve}}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      # "session" suits the local container (a direct connection SQLAlchemy
+      # owns). Supabase transaction mode (6543) needs "transaction".
+      DB_POOL_MODE: ${DB_POOL_MODE:-session}
+      DB_REQUIRE_RLS: ${DB_REQUIRE_RLS:-true}
+    ports:
+      - "127.0.0.1:${API_PORT:-8000}:8000"
+    volumes:
+      - ./apps/api:/app
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/healthz')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+volumes:
+  postgres_data:
+    name: llm_observe_postgres_data
+  redis_data:
+    name: llm_observe_redis_data

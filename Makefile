@@ -34,9 +34,11 @@ serve: $(VENV)
 	$(LOCAL) ../../$(VENV)/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
 
 # Issue an API key:  make key NAME=my-project
+#   ARGS=--rotate    new key for an existing project, KEEPING its traces
+#   ARGS=--replace   recreate the project, DELETING its traces
 key: $(VENV)
-	@test -n "$(NAME)" || { echo 'usage: make key NAME=my-project'; exit 1; }
-	@$(LOCAL) ../../$(PY) scripts/create_project.py "$(NAME)"
+	@test -n "$(NAME)" || { echo 'usage: make key NAME=my-project [ARGS=--rotate]'; exit 1; }
+	@$(LOCAL) ../../$(PY) scripts/create_project.py "$(NAME)" $(ARGS)
 
 local-migrate: $(VENV)
 	$(LOCAL) MIGRATION_DATABASE_URL="$${MIGRATION_DATABASE_URL:-$$SUPABASE_MIGRATION_URL}" \

@@ -66,7 +66,18 @@ def _chunked(rows: Sequence[dict[str, Any]], size: int) -> Iterator[Sequence[dic
         yield rows[start : start + size]
 
 
-def _trace_row(trace: IngestTrace, project_id: UUID, sdk_version: str | None) -> dict[str, Any]:
+def _trace_row(
+    trace: IngestTrace,
+    project_id: UUID,
+    sdk_version: str | None,
+    window: tuple[datetime, datetime] | None,
+) -> dict[str, Any]:
+    """Build the row for one trace.
+
+    `window` is the started_at span of this batch's observations for the trace,
+    or None when the batch carried none. It is merged rather than assigned by
+    the upsert, so a later batch widens the span instead of replacing it.
+    """
     return {
         "id": trace.id,
         "project_id": project_id,
@@ -77,17 +88,26 @@ def _trace_row(trace: IngestTrace, project_id: UUID, sdk_version: str | None) ->
         "started_at": trace.started_at,
         "ended_at": trace.ended_at,
         "sdk_version": sdk_version,
+        "observations_started_min": window[0] if window else None,
+        "observations_started_max": window[1] if window else None,
     }
 
 
 def _observation_rows(
     batch: IngestBatch, project_id: UUID
-) -> tuple[list[dict[str, Any]], dict[UUID, datetime], int]:
+) -> tuple[list[dict[str, Any]], dict[UUID, tuple[datetime, datetime]], set[UUID], int]:
     """Flatten the batch into observation rows, pricing each one as it goes.
 
-    Also returns the earliest timestamp seen per trace id that the batch does
-    not itself carry a trace for - the basis for the stub rows below - and the
-    number of observations refused for falling outside the partition window.
+    Returns, alongside the rows:
+
+    * `windows` - the (earliest, latest) started_at seen per trace id, for every
+      trace the batch touches. This is what lets a read bound its scan of the
+      partitioned `observations` table; see the Trace model. It must cover
+      traces the batch carries explicitly as well as orphans, because under the
+      flat envelope a trace event and its observation events arrive as siblings,
+      so an explicit trace's observations never appear in `trace.observations`.
+    * `orphan_ids` - trace ids with no trace row in this batch, which need stubs.
+    * the number of observations refused for falling outside the partition window.
     """
     settings = get_settings()
     now = datetime.now(UTC)
@@ -96,7 +116,8 @@ def _observation_rows(
 
     rows: list[dict[str, Any]] = []
     explicit_trace_ids = {trace.id for trace in batch.traces}
-    orphan_starts: dict[UUID, datetime] = {}
+    windows: dict[UUID, tuple[datetime, datetime]] = {}
+    orphan_ids: set[UUID] = set()
     rejected = 0
 
     def _pairs() -> Iterator[tuple[IngestObservation, IngestTrace | None]]:
@@ -141,10 +162,14 @@ def _observation_rows(
             rejected += 1
             continue
 
+        seen = windows.get(trace_id)
+        windows[trace_id] = (
+            (started_at, started_at)
+            if seen is None
+            else (min(seen[0], started_at), max(seen[1], started_at))
+        )
         if trace_id not in explicit_trace_ids:
-            seen = orphan_starts.get(trace_id)
-            if seen is None or started_at < seen:
-                orphan_starts[trace_id] = started_at
+            orphan_ids.add(trace_id)
 
         rows.append(
             {
@@ -174,7 +199,7 @@ def _observation_rows(
         # default; writing either would be rejected or would fight the
         # database for authorship.
 
-    return rows, orphan_starts, rejected
+    return rows, windows, orphan_ids, rejected
 
 
 async def _upsert_traces(session: AsyncSession, rows: Sequence[dict[str, Any]]) -> None:
@@ -216,6 +241,18 @@ async def _upsert_traces(session: AsyncSession, rows: Sequence[dict[str, Any]]) 
                     "started_at": excluded.started_at,
                     "ended_at": func.coalesce(excluded.ended_at, _traces.c.ended_at),
                     "sdk_version": func.coalesce(excluded.sdk_version, _traces.c.sdk_version),
+                    # least/greatest ignore NULLs in Postgres, so a batch that
+                    # carries no observations for this trace leaves the stored
+                    # span untouched, and one that does only ever widens it.
+                    # That is what keeps the span correct when a trace's
+                    # observations arrive across many batches, and idempotent
+                    # when any of them is replayed.
+                    "observations_started_min": func.least(
+                        _traces.c.observations_started_min, excluded.observations_started_min
+                    ),
+                    "observations_started_max": func.greatest(
+                        _traces.c.observations_started_max, excluded.observations_started_max
+                    ),
                     "updated_at": func.now(),
                 },
             )
@@ -223,7 +260,9 @@ async def _upsert_traces(session: AsyncSession, rows: Sequence[dict[str, Any]]) 
 
 
 async def _insert_stub_traces(
-    session: AsyncSession, project_id: UUID, orphan_starts: dict[UUID, datetime]
+    session: AsyncSession,
+    project_id: UUID,
+    orphan_windows: dict[UUID, tuple[datetime, datetime]],
 ) -> None:
     """Create placeholder traces for observations whose trace has not arrived.
 
@@ -231,19 +270,61 @@ async def _insert_stub_traces(
     cannot reject the observation (see the model docstring). The stub keeps the
     trace list view from hiding a run whose parent is still in flight.
 
-    DO NOTHING here is the correct half of the asymmetry: a stub must never
-    overwrite a real trace, while a real trace must overwrite a stub.
+    DO NOTHING is the correct half of the asymmetry for the *descriptive*
+    columns: a stub must never overwrite a real trace, while a real trace must
+    overwrite a stub.
+
+    The observation window is the exception, and it has to be, because a client
+    that flushes eagerly sends each observation in its own request. Under
+    DO NOTHING the first one would create the stub with a window of
+    [t, t] and every later observation for that trace would be dropped on the
+    floor - leaving a window one instant wide while the trace's own spans fall
+    outside it, invisible to every read that bounds its scan by that window.
+
+    So the conflict clause widens the window and touches nothing else. That is
+    not a stub guessing: min/max here are measured from observations actually in
+    hand, so they are facts a real trace row should absorb too. least/greatest
+    ignore NULLs and are order-independent, which keeps this idempotent under
+    replay and under out-of-order delivery alike.
     """
-    if not orphan_starts:
+    if not orphan_windows:
         return
 
     rows = [
-        {"id": trace_id, "project_id": project_id, "started_at": started_at}
-        for trace_id, started_at in orphan_starts.items()
+        {
+            "id": trace_id,
+            "project_id": project_id,
+            # The stub's own timestamp is a guess, corrected when the real trace
+            # lands. The observation span is not a guess - it is measured from
+            # the observations in hand - so it is recorded even here.
+            "started_at": window[0],
+            "observations_started_min": window[0],
+            "observations_started_max": window[1],
+        }
+        for trace_id, window in orphan_windows.items()
     ]
     for chunk in _chunked(rows, _CHUNK_ROWS):
         stmt = pg_insert(_traces).values(list(chunk))
-        await session.execute(stmt.on_conflict_do_nothing(index_elements=["project_id", "id"]))
+        excluded = stmt.excluded
+        await session.execute(
+            stmt.on_conflict_do_update(
+                index_elements=["project_id", "id"],
+                set_={
+                    # Only these. Every descriptive column is left exactly as the
+                    # existing row has it, so a stub still cannot clobber a real
+                    # trace's name, user_id or timestamps.
+                    "observations_started_min": func.least(
+                        _traces.c.observations_started_min,
+                        excluded.observations_started_min,
+                    ),
+                    "observations_started_max": func.greatest(
+                        _traces.c.observations_started_max,
+                        excluded.observations_started_max,
+                    ),
+                    "updated_at": func.now(),
+                },
+            )
+        )
 
 
 async def _insert_observations(session: AsyncSession, rows: Sequence[dict[str, Any]]) -> None:
@@ -327,14 +408,18 @@ async def ingest(
     # that cannot set headers cleanly.
     effective_sdk_version = sdk_version or batch.sdk_version
 
-    observation_rows, orphan_starts, rejected = _observation_rows(batch, project_id)
-    trace_rows = [_trace_row(trace, project_id, effective_sdk_version) for trace in batch.traces]
+    observation_rows, windows, orphan_ids, rejected = _observation_rows(batch, project_id)
+    trace_rows = [
+        _trace_row(trace, project_id, effective_sdk_version, windows.get(trace.id))
+        for trace in batch.traces
+    ]
+    orphan_windows = {trace_id: windows[trace_id] for trace_id in orphan_ids}
 
     # Traces first so that the common case - a trace and its observations in one
     # batch - never leaves an observation pointing at a row that does not exist
     # yet. Stubs last of the two, so a real trace in this same batch wins.
     await _upsert_traces(session, trace_rows)
-    await _insert_stub_traces(session, project_id, orphan_starts)
+    await _insert_stub_traces(session, project_id, orphan_windows)
     await _insert_observations(session, observation_rows)
 
     logger.info(
@@ -342,7 +427,7 @@ async def ingest(
         project_id,
         trace_count,
         len(observation_rows),
-        len(orphan_starts),
+        len(orphan_windows),
         rejected,
         effective_sdk_version or "unknown",
     )

@@ -1,13 +1,13 @@
 # Testing the API with the Python SDK
 
-End-to-end loop: run `apps/api`, point the `llmobserve` SDK at it, confirm a
+End-to-end loop: run `apps/api`, point the `llm-metrics` SDK at it, confirm a
 trace lands in Postgres.
 
 The SDK **fails silently by design** — if delivery fails, your program still
 runs and returns normally. So the first rule of testing this loop is:
 
 ```bash
-export LLMOBSERVE_DEBUG=1
+export LLM_METRICS_DEBUG=1
 ```
 
 Without it, a rejected batch looks exactly like a working one, and the only
@@ -154,16 +154,16 @@ open http://127.0.0.1:8000/docs          # interactive OpenAPI
 ## 7. Point the SDK at it
 
 ```bash
-export LLMOBSERVE_API_KEY=llmo_sk_...    # from step 5
-export LLMOBSERVE_HOST=http://127.0.0.1:8000
-export LLMOBSERVE_DEBUG=1
+export LLM_METRICS_API_KEY=llmo_sk_...    # from step 5
+export LLM_METRICS_HOST=http://127.0.0.1:8000
+export LLM_METRICS_DEBUG=1
 ```
 
 ```python
 import time
 
-import llmobserve
-from llmobserve import observe
+import llm_metrics
+from llm_metrics import observe
 
 @observe(as_type="generation", name="chat")
 def chat(prompt: str) -> str:
@@ -175,23 +175,30 @@ def request(prompt: str) -> str:
     return chat(prompt)
 
 request("hello")
-llmobserve.flush()      # the buffer is async; flush before the process exits
-llmobserve.shutdown()
+llm_metrics.flush()      # the buffer is async; flush before the process exits
+llm_metrics.shutdown()
 ```
 
 ```bash
+# Either the published package, in any environment you like:
+pip install llm-metrics
+
+# ...or the local checkout, if you are developing the SDK alongside the API:
 cd ~/git-repo/llmobserve-python && .venv/bin/python your_script.py
 ```
 
+The distribution is `llm-metrics`; the import is `llm_metrics`. The repo
+directory is still named `llmobserve-python` — it predates the rename.
+
 `flush()` matters. The SDK buffers and delivers on a background thread, so a
 short script can exit before anything is sent. For faster feedback while
-testing, `llmobserve.configure(flush_at=1, flush_interval=0.5)` sends each
+testing, `llm_metrics.configure(flush_at=1, flush_interval=0.5)` sends each
 event immediately instead of waiting for a full batch.
 
 Clean output means delivery succeeded. Anything else looks like:
 
 ```
-llmobserve: dropped 1 event(s): HTTP 422
+llm_metrics: dropped 1 event(s): HTTP 422
 ```
 
 ---
@@ -239,7 +246,7 @@ Every failure mode here is quiet. That is why the table exists.
 
 | Symptom | Cause | Fix |
 |---|---|---|
-| No output at all, empty database | `LLMOBSERVE_DEBUG` unset | Set it. The SDK never raises on delivery failure. |
+| No output at all, empty database | `LLM_METRICS_DEBUG` unset | Set it. The SDK never raises on delivery failure. |
 | `dropped N event(s): HTTP 401` | Key not recognised | Reissue with `make key`. 401 is deliberately identical for a missing header, wrong scheme, and unknown key. |
 | `HTTP 422` mentioning `traces`/`events` | Envelope not recognised | The body must carry `events` or `traces`. This 422 is intentional — see below. |
 | `HTTP 422` on a specific field | Type mismatch | Read `loc` in the response body; it names the exact field. |
@@ -247,7 +254,7 @@ Every failure mode here is quiet. That is why the table exists.
 | 202 but nothing in the database | Wrong project, or observations rejected | Check `rejected_observations` in the response body. |
 | `rejected_observations > 0` | Timestamp outside the accepted window | Client clock skew. Retrying cannot help — the event only ages further out of range. |
 | Rows visible across projects | Runtime role bypasses RLS | `DATABASE_URL` points at an admin role. `/readyz` catches this. |
-| Script exits, nothing sent | No `flush()` | Call `llmobserve.flush()` before exit. |
+| Script exits, nothing sent | No `flush()` | Call `llm_metrics.flush()` before exit. |
 
 ### Why an unrecognised envelope is a 422
 

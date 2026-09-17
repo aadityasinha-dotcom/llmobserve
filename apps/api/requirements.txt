@@ -1,0 +1,12 @@
+# Runtime dependencies for the Vercel deployment, which installs from this file.
+#
+# This mirrors [project].dependencies in pyproject.toml, minus the two packages a
+# serverless function never uses: uvicorn (Vercel supplies the server) and
+# alembic (migrations run from a workstation or CI, never from a request).
+# tests/test_vercel_packaging.py fails if the two lists drift apart.
+fastapi>=0.115
+sqlalchemy[asyncio]>=2.0.36
+asyncpg>=0.30
+pydantic>=2.9
+pydantic-settings>=2.6
+orjson>=3.10

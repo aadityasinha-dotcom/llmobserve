@@ -1,0 +1,7 @@
+# Applies to `vercel` CLI deploys. Git-based deploys only see committed files.
+node_modules
+.next
+.env
+.env.*
+!.env.example
+*.tsbuildinfo

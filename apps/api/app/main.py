@@ -6,7 +6,7 @@ from fastapi import FastAPI
 
 from app.config import get_settings
 from app.db import check_database_ready, dispose_engine
-from app.routers import ingest
+from app.routers import ingest, traces
 
 logger = logging.getLogger(__name__)
 
@@ -55,3 +55,4 @@ async def readyz() -> dict[str, str]:
 
 
 app.include_router(ingest.router)
+app.include_router(traces.router)

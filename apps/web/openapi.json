@@ -1,0 +1,1222 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "llm-observe API",
+    "version": "0.1.0"
+  },
+  "paths": {
+    "/healthz": {
+      "get": {
+        "tags": [
+          "ops"
+        ],
+        "summary": "Healthz",
+        "description": "Liveness. Deliberately does not touch the database.",
+        "operationId": "healthz_healthz_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "type": "object",
+                  "title": "Response Healthz Healthz Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/readyz": {
+      "get": {
+        "tags": [
+          "ops"
+        ],
+        "summary": "Readyz",
+        "description": "Readiness: Postgres is reachable and row-level security is in force.\n\nRaising here is intentional. An instance whose runtime role bypasses RLS\nmust never receive traffic, so a misconfigured DATABASE_URL fails the\ndeploy loudly instead of silently serving cross-tenant data.",
+        "operationId": "readyz_readyz_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "type": "object",
+                  "title": "Response Readyz Readyz Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/ingest": {
+      "post": {
+        "tags": [
+          "ingest"
+        ],
+        "summary": "Ingest a batch of traces and observations",
+        "description": "Accept a batch, write it, and return.\n\n202 rather than 201: what is promised is durability, not that any particular\nrow was newly created. A retry of an already-stored batch is a success and\nreports the same counts as the original.",
+        "operationId": "ingest_v1_ingest_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "X-SDK-Version",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Sdk-Version"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IngestBatch"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IngestAccepted"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or unrecognised API key"
+          },
+          "413": {
+            "description": "Batch exceeds the configured size limits"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/traces": {
+      "get": {
+        "tags": [
+          "traces"
+        ],
+        "summary": "List traces, newest first",
+        "description": "Return one page of traces, newest first, without their payloads.\n\nOrdered by `(started_at DESC, id DESC)`. The id is not decoration: traces\nwritten by one batch routinely share a timestamp, and it is the tiebreaker\nthat gives the sort a total order, which is the whole basis for the cursor\nbeing stable across pages.\n\nThe range filters apply to `started_at` - event time, when the run actually\nhappened - not to `created_at`, which is when this server received it. They\ndiffer whenever a client buffered, retried, or was offline.",
+        "operationId": "list_traces_v1_traces_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
+              "default": 50,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Opaque cursor from a previous page.",
+              "title": "Cursor"
+            },
+            "description": "Opaque cursor from a previous page."
+          },
+          {
+            "name": "name",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Exact trace name match.",
+              "title": "Name"
+            },
+            "description": "Exact trace name match."
+          },
+          {
+            "name": "user_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Exact match on the client's end-user id.",
+              "title": "User Id"
+            },
+            "description": "Exact match on the client's end-user id."
+          },
+          {
+            "name": "session_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Exact match on the client's session id.",
+              "title": "Session Id"
+            },
+            "description": "Exact match on the client's session id."
+          },
+          {
+            "name": "from",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only traces with started_at >= this (inclusive).",
+              "title": "From"
+            },
+            "description": "Only traces with started_at >= this (inclusive)."
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only traces with started_at < this (exclusive).",
+              "title": "To"
+            },
+            "description": "Only traces with started_at < this (exclusive)."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TraceListResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Malformed cursor"
+          },
+          "401": {
+            "description": "Missing or unrecognised API key"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/traces/{trace_id}": {
+      "get": {
+        "tags": [
+          "traces"
+        ],
+        "summary": "One trace with all of its observations",
+        "description": "Return one trace and every observation under it, payloads included.\n\nObservations come back flat and ordered by started_at, with\n`parent_observation_id` intact; the client assembles the tree. Nesting is not\nvalidated here - the column carries no foreign key on purpose, so a parent\nthat is still in flight is expected rather than corrupt.\n\nA trace in another project is a 404, not a 403. Distinguishing the two would\nconfirm that an id exists, which is a cross-tenant disclosure however small;\nRLS makes the row invisible and the absence is reported as absence.",
+        "operationId": "get_trace_v1_traces__trace_id__get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "trace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Trace Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TraceDetail"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or unrecognised API key"
+          },
+          "404": {
+            "description": "No such trace in this project"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "type": "array",
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "title": "HTTPValidationError"
+      },
+      "IngestAccepted": {
+        "properties": {
+          "accepted_traces": {
+            "type": "integer",
+            "title": "Accepted Traces"
+          },
+          "accepted_observations": {
+            "type": "integer",
+            "title": "Accepted Observations"
+          },
+          "rejected_observations": {
+            "type": "integer",
+            "title": "Rejected Observations",
+            "default": 0
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "accepted_traces",
+          "accepted_observations"
+        ],
+        "title": "IngestAccepted",
+        "description": "Response body. 202, because durability is all that is promised here.\n\nCounts are what was accepted for writing, not what was newly inserted -\nduplicates from a retry are accepted and silently deduplicated, and the\nclient must not treat a lower number as an error."
+      },
+      "IngestBatch": {
+        "properties": {
+          "traces": {
+            "items": {
+              "$ref": "#/components/schemas/IngestTrace"
+            },
+            "type": "array",
+            "maxItems": 1000,
+            "title": "Traces"
+          },
+          "observations": {
+            "items": {
+              "$ref": "#/components/schemas/IngestObservation"
+            },
+            "type": "array",
+            "maxItems": 10000,
+            "title": "Observations"
+          },
+          "sdk_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sdk Version"
+          }
+        },
+        "type": "object",
+        "title": "IngestBatch",
+        "description": "The POST /v1/ingest request body. Two envelopes are accepted.\n\nFlat (what the Python SDK sends), a single stream discriminated by `type`::\n\n    {\"events\": [{\"id\": ..., \"type\": \"trace\", ...},\n                {\"id\": ..., \"type\": \"generation\", \"trace_id\": ..., ...}]}\n\nNested, where observations are carried inside their trace::\n\n    {\"traces\": [{\"id\": ..., \"observations\": [...]}]}\n\nThe flat form is the one that suits a buffering client: spans finish\nindependently and flush in whatever order they complete, so requiring the\nnesting would force the SDK to hold a trace open until its last child\nreturned - and a long-running trace could not be reported until it ended.\nNothing is lost by accepting it, because every observation carries its own\ntrace_id and the router already creates a placeholder for a trace it has not\nseen yet.\n\nBoth normalise to the same internal shape before the router runs: `traces`\nfor trace rows, `observations` for the flat remainder."
+      },
+      "IngestObservation": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "trace_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Trace Id"
+          },
+          "parent_observation_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent Observation Id"
+          },
+          "type": {
+            "type": "string",
+            "title": "Type",
+            "default": "span"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
+          "provider": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider"
+          },
+          "input": {
+            "anyOf": [
+              {},
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Input"
+          },
+          "output": {
+            "anyOf": [
+              {},
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Output"
+          },
+          "prompt_tokens": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "minimum": 0.0,
+            "title": "Prompt Tokens"
+          },
+          "completion_tokens": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "minimum": 0.0,
+            "title": "Completion Tokens"
+          },
+          "latency_ms": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "minimum": 0.0,
+            "title": "Latency Ms"
+          },
+          "level": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Level"
+          },
+          "status_message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Status Message"
+          },
+          "metadata": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Metadata"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          },
+          "ended_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ended At"
+          }
+        },
+        "type": "object",
+        "title": "IngestObservation",
+        "description": "One step inside a trace: an LLM generation, a span, or a discrete event."
+      },
+      "IngestTrace": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "user_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Id"
+          },
+          "session_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Session Id"
+          },
+          "metadata": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Metadata"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          },
+          "ended_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ended At"
+          },
+          "observations": {
+            "items": {
+              "$ref": "#/components/schemas/IngestObservation"
+            },
+            "type": "array",
+            "maxItems": 2000,
+            "title": "Observations"
+          }
+        },
+        "type": "object",
+        "title": "IngestTrace",
+        "description": "One logical run through the client application, with its observations nested."
+      },
+      "ObservationDetail": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "trace_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Trace Id"
+          },
+          "parent_observation_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent Observation Id"
+          },
+          "type": {
+            "type": "string",
+            "title": "Type"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
+          "provider": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider"
+          },
+          "input": {
+            "anyOf": [
+              {},
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Input"
+          },
+          "output": {
+            "anyOf": [
+              {},
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Output"
+          },
+          "prompt_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prompt Tokens"
+          },
+          "completion_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Completion Tokens"
+          },
+          "total_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Tokens"
+          },
+          "cost_usd": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "decimal",
+            "title": "Cost Usd"
+          },
+          "latency_ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Latency Ms"
+          },
+          "level": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Level"
+          },
+          "status_message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Status Message"
+          },
+          "metadata": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Metadata"
+          },
+          "started_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Started At"
+          },
+          "ended_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ended At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "trace_id",
+          "type",
+          "metadata",
+          "started_at"
+        ],
+        "title": "ObservationDetail",
+        "description": "One observation, with its payloads.\n\nReturned flat, with `parent_observation_id` intact, ordered by started_at so\nthe client can assemble the tree in a single pass.\n\nA dangling `parent_observation_id` is normal, not corrupt: the column carries\nno foreign key on purpose, because batches split and retry independently and\na parent may still be in flight. Render an orphan at the root; do not drop it."
+      },
+      "TraceDetail": {
+        "properties": {
+          "observation_count": {
+            "type": "integer",
+            "title": "Observation Count",
+            "default": 0
+          },
+          "prompt_tokens": {
+            "type": "integer",
+            "title": "Prompt Tokens",
+            "default": 0
+          },
+          "completion_tokens": {
+            "type": "integer",
+            "title": "Completion Tokens",
+            "default": 0
+          },
+          "total_tokens": {
+            "type": "integer",
+            "title": "Total Tokens",
+            "default": 0
+          },
+          "total_cost_usd": {
+            "type": "string",
+            "format": "decimal",
+            "title": "Total Cost Usd",
+            "default": "0",
+            "examples": [
+              "0.00123400"
+            ]
+          },
+          "total_latency_ms": {
+            "type": "integer",
+            "title": "Total Latency Ms",
+            "default": 0
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "user_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Id"
+          },
+          "session_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Session Id"
+          },
+          "metadata": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Metadata"
+          },
+          "started_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Started At"
+          },
+          "ended_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ended At"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "sdk_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sdk Version"
+          },
+          "duration_ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duration Ms"
+          },
+          "observations": {
+            "items": {
+              "$ref": "#/components/schemas/ObservationDetail"
+            },
+            "type": "array",
+            "title": "Observations"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "metadata",
+          "started_at",
+          "created_at",
+          "observations"
+        ],
+        "title": "TraceDetail",
+        "description": "GET /v1/traces/{trace_id}: one trace and every observation under it.\n\nEmpty `observations` is a 200, never a 404. A trace with no observations is\na legitimate thing to look at - it may be open, or a stub whose spans have\nnot landed - and the trace row itself is what the id addresses."
+      },
+      "TraceListItem": {
+        "properties": {
+          "observation_count": {
+            "type": "integer",
+            "title": "Observation Count",
+            "default": 0
+          },
+          "prompt_tokens": {
+            "type": "integer",
+            "title": "Prompt Tokens",
+            "default": 0
+          },
+          "completion_tokens": {
+            "type": "integer",
+            "title": "Completion Tokens",
+            "default": 0
+          },
+          "total_tokens": {
+            "type": "integer",
+            "title": "Total Tokens",
+            "default": 0
+          },
+          "total_cost_usd": {
+            "type": "string",
+            "format": "decimal",
+            "title": "Total Cost Usd",
+            "default": "0",
+            "examples": [
+              "0.00123400"
+            ]
+          },
+          "total_latency_ms": {
+            "type": "integer",
+            "title": "Total Latency Ms",
+            "default": 0
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "user_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Id"
+          },
+          "session_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Session Id"
+          },
+          "metadata": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Metadata"
+          },
+          "started_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Started At"
+          },
+          "ended_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ended At"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "sdk_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sdk Version"
+          },
+          "duration_ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duration Ms"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "metadata",
+          "started_at",
+          "created_at"
+        ],
+        "title": "TraceListItem",
+        "description": "One row of GET /v1/traces."
+      },
+      "TraceListResponse": {
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/TraceListItem"
+            },
+            "type": "array",
+            "title": "Data"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          },
+          "has_more": {
+            "type": "boolean",
+            "title": "Has More",
+            "default": false
+          }
+        },
+        "type": "object",
+        "required": [
+          "data"
+        ],
+        "title": "TraceListResponse",
+        "description": "A page of traces plus the cursor that continues it.\n\n`next_cursor` is opaque and must be echoed back verbatim. It encodes the\n(started_at, id) of the last row on this page, which is what makes paging\nstable when traces share a timestamp - id breaks the tie and the seek uses\nthe same pair the ORDER BY does."
+      },
+      "ValidationError": {
+        "properties": {
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "type": "array",
+            "title": "Location"
+          },
+          "msg": {
+            "type": "string",
+            "title": "Message"
+          },
+          "type": {
+            "type": "string",
+            "title": "Error Type"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "ctx": {
+            "type": "object",
+            "title": "Context"
+          }
+        },
+        "type": "object",
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError"
+      }
+    },
+    "securitySchemes": {
+      "HTTPBearer": {
+        "type": "http",
+        "description": "API key issued for a project",
+        "scheme": "bearer"
+      }
+    }
+  }
+}

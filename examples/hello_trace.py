@@ -1,12 +1,12 @@
 #!/usr/bin/env python
 """Send one trace to a locally running llm-observe API.
 
-Run it with the SDK's interpreter, not this repo's — `llmobserve` lives in the
+Run it with the SDK's interpreter, not this repo's — `llm_metrics` lives in the
 separate llmobserve-python repo and is not a dependency here:
 
-    export LLMOBSERVE_API_KEY=$(cat ~/.llmobserve_dev_key)
-    export LLMOBSERVE_HOST=http://127.0.0.1:8000
-    export LLMOBSERVE_DEBUG=1
+    export LLM_METRICS_API_KEY=$(cat ~/.llmobserve_dev_key)
+    export LLM_METRICS_HOST=http://127.0.0.1:8000
+    export LLM_METRICS_DEBUG=1
     ~/git-repo/llmobserve-python/.venv/bin/python examples/hello_trace.py
 
 Start the API first, in another terminal: `make serve`.
@@ -17,29 +17,29 @@ import sys
 import time
 
 try:
-    import llmobserve
-    from llmobserve import observe
+    import llm_metrics
+    from llm_metrics import observe
 except ModuleNotFoundError:
     sys.exit(
-        "llmobserve is not importable.\n"
+        "llm_metrics is not importable.\n"
         "Run this with the SDK's interpreter:\n"
         "  ~/git-repo/llmobserve-python/.venv/bin/python examples/hello_trace.py"
     )
 
-if not os.environ.get("LLMOBSERVE_API_KEY"):
+if not os.environ.get("LLM_METRICS_API_KEY"):
     sys.exit(
-        "LLMOBSERVE_API_KEY is not set.\n"
-        "  export LLMOBSERVE_API_KEY=$(cat ~/.llmobserve_dev_key)\n"
+        "LLM_METRICS_API_KEY is not set.\n"
+        "  export LLM_METRICS_API_KEY=$(cat ~/.llmobserve_dev_key)\n"
         "or issue a new one with:  make key NAME=my-app"
     )
 
-if not os.environ.get("LLMOBSERVE_DEBUG"):
-    print("! LLMOBSERVE_DEBUG is unset - delivery failures will be silent.\n")
+if not os.environ.get("LLM_METRICS_DEBUG"):
+    print("! LLM_METRICS_DEBUG is unset - delivery failures will be silent.\n")
 
 # flush_at=1 sends each event as it completes instead of waiting for a full
 # batch. Right for a smoke test, wrong for production: it trades throughput for
 # immediate feedback.
-llmobserve.configure(flush_at=1, flush_interval=0.5)
+llm_metrics.configure(flush_at=1, flush_interval=0.5)
 
 
 @observe(as_type="generation", name="summarise")
@@ -50,7 +50,7 @@ def summarise(text: str) -> str:
     cost_usd = NULL - which is correct. Null means unknown, not free. Cost is
     populated by the integrations, e.g.:
 
-        from llmobserve.integrations.openai import wrap_openai
+        from llm_metrics.integrations.openai import wrap_openai
         client = wrap_openai(OpenAI())
 
     which records the model and usage the provider actually returned, and the
@@ -74,7 +74,7 @@ def handle_request(doc_id: str) -> str:
 
 
 def main() -> None:
-    host = os.environ.get("LLMOBSERVE_HOST", "https://cloud.llm-observe.dev")
+    host = os.environ.get("LLM_METRICS_HOST", "https://cloud.llm-observe.dev")
     print(f"sending to {host}")
 
     result = handle_request("doc-42")
@@ -82,8 +82,8 @@ def main() -> None:
 
     # The buffer delivers on a background thread, so a short script can exit
     # before anything is sent. flush() blocks until the queue drains.
-    llmobserve.flush()
-    llmobserve.shutdown()
+    llm_metrics.flush()
+    llm_metrics.shutdown()
 
     print("\nflushed. Expect 3 x '202 Accepted' in the API terminal:")
     print("  handle-request  (span, the trace root)")

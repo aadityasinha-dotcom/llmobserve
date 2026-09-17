@@ -31,10 +31,23 @@ In the Vercel dashboard: **Add New → Project → import the repo**, then:
 | Framework Preset | Other |
 | Build / Output / Install | leave empty |
 
-`apps/api/vercel.json` does the rest: every path is rewritten to
-`api/index.py`, and functions run in **`bom1` (Mumbai)**, next to the Supabase
-project. Leave the region there. From the default `iad1` every query crosses
-the planet, and ingest issues several per request.
+Nothing else. Vercel detects the FastAPI app at `app/main.py` — `main.py`
+inside `app/` is one of its auto-detected entrypoints — and routes **every**
+path to it, so `/healthz`, `/v1/ingest` and the rest work as they do under
+uvicorn.
+
+`apps/api/vercel.json` only tunes that function: `maxDuration`, `excludeFiles`,
+and the **`bom1` (Mumbai)** region, next to the Supabase project. Leave the
+region there. From the default `iad1` every query crosses the planet, and ingest
+issues several per request.
+
+**Do not add a `rewrites` block.** Routing all paths to a function
+(`{"source": "/(.*)", "destination": "/api/index"}`) replaces the path the ASGI
+app receives, so FastAPI sees `/api/index` for every request and returns 404 for
+all of them — including `/healthz` and `/openapi.json`, which looks like the app
+failed to load rather than a routing mistake. That is how the first deployment
+of this project failed. `tests/test_vercel_packaging.py` now fails if a
+`rewrites` or `routes` block reappears.
 
 ### Environment variables (Production)
 
@@ -55,9 +68,11 @@ postgresql+asyncpg://llmobserve_app.zmsijiqvrhvqfofomigb:<password>@aws-0-ap-sou
 Do not add `SUPABASE_MIGRATION_URL` or any `postgres`-role URL. A function that
 serves traffic has no use for owner credentials. The `postgres` role also has
 `BYPASSRLS`, so connecting as it switches off tenant isolation with no error.
-The API now checks for that on the first tenant request of every instance and
-answers **503** until it is fixed. That check replaces the `/readyz` gate,
-which Vercel does not have.
+The API checks for that on the first tenant request of every instance and
+answers **503** until it is fixed. Vercel supports FastAPI lifespan events, but
+it has no readiness probe — nothing consults `/readyz` before sending traffic —
+so the in-request check is what actually keeps a misconfigured deployment from
+serving cross-tenant data.
 
 Deploy, then:
 
@@ -148,4 +163,6 @@ enqueue to a hosted Redis.
 | Dashboard: "API key rejected" | Key not issued against this database, or you hit a protected deployment URL |
 | SDK: silent, nothing lands | `LLM_METRICS_DEBUG` unset. Set it and re-run |
 | `ModuleNotFoundError` in function logs | A runtime dependency is missing from `apps/api/requirements.txt`. `tests/test_vercel_packaging.py` should have caught it |
+| **Every path 404s with `{"detail":"Not Found"}`** | A `rewrites`/`routes` block in `vercel.json` is rewriting the path. Remove it; Vercel routes to the entrypoint on its own |
+| Every path 404s with Vercel's own HTML 404 | No entrypoint detected. The app must be at `app/main.py` (or another detected name) and export `app` |
 | Password looks right but auth fails | An unencoded `@`, `:` or `/` in the password. Check with `sqlalchemy.engine.url.make_url()` |

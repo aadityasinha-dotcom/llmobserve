@@ -2,9 +2,9 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "regions": ["bom1"],
   "functions": {
-    "api/index.py": {
-      "maxDuration": 30
+    "app/main.py": {
+      "maxDuration": 30,
+      "excludeFiles": "{tests/**,alembic/**,scripts/**,.venv/**,**/test_*.py,Dockerfile}"
     }
-  },
-  "rewrites": [{ "source": "/(.*)", "destination": "/api/index" }]
+  }
 }

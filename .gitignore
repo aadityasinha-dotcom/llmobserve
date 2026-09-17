@@ -1,5 +1,9 @@
 .env
 *.env
+# Next.js local overrides: *.env above matches only files ENDING in
+# .env, so .env.local needs its own pattern or it is committable.
+.env.local
+.env*.local
 !.env.example
 
 __pycache__/

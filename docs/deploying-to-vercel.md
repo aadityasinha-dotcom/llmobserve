@@ -65,6 +65,27 @@ of this project failed. `tests/test_vercel_packaging.py` now fails if a
 postgresql+asyncpg://llmobserve_app.zmsijiqvrhvqfofomigb:<password>@aws-0-ap-south-1.pooler.supabase.com:6543/postgres?ssl=require
 ```
 
+Values are validated on load and must match **exactly** — lowercase, no quotes,
+no trailing spaces:
+
+| Variable | Accepted values |
+|---|---|
+| `DB_POOL_MODE` | `session` or `transaction` — nothing else, and case-sensitive |
+| `DB_REQUIRE_RLS` | `true` / `false` (also `1` / `0`, `yes` / `no`) |
+| `ENVIRONMENT` | any string |
+| `INGEST_MAX_*` | integers |
+
+A value outside that set makes every settings-dependent route answer **503**
+with the offending variable named:
+
+```json
+{"detail":{"status":"config_error","invalid_env_vars":["DB_POOL_MODE"], ...}}
+```
+
+`/openapi.json` keeps working, because it does not read settings — so
+"`/openapi.json` 200 but `/healthz` failing" means a bad environment variable,
+not a broken deployment.
+
 Do not add `SUPABASE_MIGRATION_URL` or any `postgres`-role URL. A function that
 serves traffic has no use for owner credentials. The `postgres` role also has
 `BYPASSRLS`, so connecting as it switches off tenant isolation with no error.
@@ -165,4 +186,6 @@ enqueue to a hosted Redis.
 | `ModuleNotFoundError` in function logs | A runtime dependency is missing from `apps/api/requirements.txt`. `tests/test_vercel_packaging.py` should have caught it |
 | **Every path 404s with `{"detail":"Not Found"}`** | A `rewrites`/`routes` block in `vercel.json` is rewriting the path. Remove it; Vercel routes to the entrypoint on its own |
 | Every path 404s with Vercel's own HTML 404 | No entrypoint detected. The app must be at `app/main.py` (or another detected name) and export `app` |
+| `/openapi.json` 200 but `/healthz` 503 `config_error` | Bad environment variable. The response names it |
+| `/openapi.json` 200 but `/healthz` 500 `Internal Server Error` | Same cause, on a build older than the `config_error` response. Check the function logs for `ValidationError` |
 | Password looks right but auth fails | An unencoded `@`, `:` or `/` in the password. Check with `sqlalchemy.engine.url.make_url()` |

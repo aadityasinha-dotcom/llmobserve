@@ -1,11 +1,40 @@
 from functools import lru_cache
-from typing import Literal
+from typing import Any, Literal
 
+from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+def _clean(value: Any) -> Any:
+    """Strip whitespace and one matched pair of surrounding quotes.
+
+    Configuration on a hosting platform is typed or pasted into a web form, and
+    two things ride along: a trailing space or newline, and the quotes from a
+    copied shell line. Both are invisible in the dashboard and neither is ever
+    part of an intended value, but `DB_REQUIRE_RLS="true"` fails validation with
+    a message about booleans - which on a serverless platform costs a redeploy
+    to diagnose.
+
+    Only matched quotes are removed, and only from the outside, so a value that
+    genuinely contains a quote is untouched.
+    """
+    if not isinstance(value, str):
+        return value
+    cleaned = value.strip()
+    if len(cleaned) >= 2 and cleaned[0] == cleaned[-1] and cleaned[0] in {'"', "'"}:
+        cleaned = cleaned[1:-1].strip()
+    return cleaned
 
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+
+    @model_validator(mode="before")
+    @classmethod
+    def _tidy_env_values(cls, data: Any) -> Any:
+        if not isinstance(data, dict):
+            return data
+        return {key: _clean(value) for key, value in data.items()}
 
     environment: str = "development"
     log_level: str = "INFO"

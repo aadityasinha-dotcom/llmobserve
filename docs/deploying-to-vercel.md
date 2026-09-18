@@ -65,13 +65,14 @@ of this project failed. `tests/test_vercel_packaging.py` now fails if a
 postgresql+asyncpg://llmobserve_app.zmsijiqvrhvqfofomigb:<password>@aws-0-ap-south-1.pooler.supabase.com:6543/postgres?ssl=require
 ```
 
-Values are validated on load and must match **exactly** — lowercase, no quotes,
-no trailing spaces:
+Values are validated on load. Surrounding quotes and stray whitespace are
+stripped before validation, so a pasted `"true"` is fine — but the value itself
+must be one the field accepts:
 
 | Variable | Accepted values |
 |---|---|
 | `DB_POOL_MODE` | `session` or `transaction` — nothing else, and case-sensitive |
-| `DB_REQUIRE_RLS` | `true` / `false` (also `1` / `0`, `yes` / `no`) |
+| `DB_REQUIRE_RLS` | `true` / `false` (also `1` / `0`, `yes` / `no`); case-insensitive |
 | `ENVIRONMENT` | any string |
 | `INGEST_MAX_*` | integers |
 

@@ -68,3 +68,35 @@ async def test_healthz_is_ok_with_valid_settings(client: AsyncClient) -> None:
     response = await client.get("/healthz")
     assert response.status_code == 200
     assert response.json()["status"] == "ok"
+
+
+@pytest.mark.parametrize(
+    "raw",
+    ['"true"', "'true'", " true", "true ", "true\n", '"TRUE" ', "\ttrue\t"],
+)
+def test_boolean_survives_dashboard_paste_artifacts(raw: str) -> None:
+    """Quotes and stray whitespace come from pasting into a hosting dashboard.
+
+    None of them is ever part of an intended value, and each one used to fail
+    validation with a message about booleans - a diagnosis that costs a redeploy
+    on a serverless platform.
+    """
+    assert config.Settings(db_require_rls=raw).db_require_rls is True  # type: ignore[arg-type]
+
+
+def test_quoted_url_is_unquoted_but_otherwise_untouched() -> None:
+    url = "postgresql+asyncpg://u:p@h:6543/postgres?ssl=require"
+    assert config.Settings(database_url=f'"{url}"').database_url == url
+    assert config.Settings(database_url=f"  {url}  ").database_url == url
+
+
+def test_only_matched_outer_quotes_are_stripped() -> None:
+    """A value that genuinely contains a quote must survive intact."""
+    assert config.Settings(environment='say "hi"').environment == 'say "hi"'
+    assert config.Settings(environment='"unbalanced').environment == '"unbalanced'
+
+
+def test_an_invalid_value_is_still_invalid() -> None:
+    """Tidying is not coercion: a wrong value must still be reported."""
+    with pytest.raises(ValidationError):
+        config.Settings(db_pool_mode='"Transaction"')  # type: ignore[arg-type]

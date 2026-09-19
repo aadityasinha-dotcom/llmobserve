@@ -14,6 +14,9 @@ export interface paths {
         /**
          * Healthz
          * @description Liveness. Deliberately does not touch the database.
+         *
+         *     Still fails when configuration is invalid: an instance that cannot read its
+         *     own settings cannot serve, and reporting "ok" would hide that.
          */
         get: operations["healthz_healthz_get"];
         put?: never;
@@ -584,8 +587,15 @@ export interface operations {
                     "application/json": components["schemas"]["IngestAccepted"];
                 };
             };
-            /** @description Missing or unrecognised API key */
+            /** @description Missing, unrecognised, or revoked API key */
             401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Key lacks the 'ingest' scope */
+            403: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -648,8 +658,15 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description Missing or unrecognised API key */
+            /** @description Missing, unrecognised, or revoked API key */
             401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Key lacks the 'read' scope */
+            403: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -686,8 +703,15 @@ export interface operations {
                     "application/json": components["schemas"]["TraceDetail"];
                 };
             };
-            /** @description Missing or unrecognised API key */
+            /** @description Missing, unrecognised, or revoked API key */
             401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Key lacks the 'read' scope */
+            403: {
                 headers: {
                     [name: string]: unknown;
                 };

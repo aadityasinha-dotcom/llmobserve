@@ -34,7 +34,7 @@ from sqlalchemy.dialects.postgresql import UUID as PgUUID
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.types import TIMESTAMP
 
-from app.deps import TenantSession
+from app.deps import RequireRead, TenantSession
 from app.models import Observation, Trace
 from app.schemas.traces import (
     ObservationDetail,
@@ -192,11 +192,15 @@ def _item_kwargs(row: Any, aggregate: dict[str, Any] | None) -> dict[str, Any]:
     summary="List traces, newest first",
     responses={
         400: {"description": "Malformed cursor"},
-        401: {"description": "Missing or unrecognised API key"},
+        401: {"description": "Missing, unrecognised, or revoked API key"},
+        403: {"description": "Key lacks the 'read' scope"},
     },
 )
 async def list_traces(
     session: TenantSession,
+    # 403 unless the key carries "read". An ingest key shipped inside a client
+    # application must not be able to read payloads back out.
+    _scope: RequireRead,
     limit: Annotated[int, Query(ge=1, le=MAX_LIMIT)] = DEFAULT_LIMIT,
     cursor: Annotated[str | None, Query(description="Opaque cursor from a previous page.")] = None,
     name: Annotated[str | None, Query(description="Exact trace name match.")] = None,
@@ -284,11 +288,12 @@ async def list_traces(
     response_model=TraceDetail,
     summary="One trace with all of its observations",
     responses={
-        401: {"description": "Missing or unrecognised API key"},
+        401: {"description": "Missing, unrecognised, or revoked API key"},
+        403: {"description": "Key lacks the 'read' scope"},
         404: {"description": "No such trace in this project"},
     },
 )
-async def get_trace(trace_id: UUID, session: TenantSession) -> TraceDetail:
+async def get_trace(trace_id: UUID, session: TenantSession, _scope: RequireRead) -> TraceDetail:
     """Return one trace and every observation under it, payloads included.
 
     Observations come back flat and ordered by started_at, with

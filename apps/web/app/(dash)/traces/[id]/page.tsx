@@ -129,9 +129,11 @@ function DetailFailure({ error }: { error: unknown }) {
   const detail =
     error instanceof MissingApiConfigError
       ? `${error.variable} is not set. Copy .env.example to .env.local and fill it in.`
-      : error instanceof ApiError
-        ? error.message
-        : "The backend returned an unexpected error.";
+      : error instanceof ApiError && error.status === 403
+        ? "This key authenticates but lacks the 'read' scope."
+        : error instanceof ApiError
+          ? error.message
+          : "The backend returned an unexpected error.";
 
   return (
     <div className="min-h-screen bg-background px-4 py-16 text-foreground">

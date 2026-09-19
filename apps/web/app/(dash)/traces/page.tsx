@@ -277,6 +277,13 @@ function LoadFailure({ error }: { error: unknown }) {
     title = "API key rejected";
     detail =
       "LLMOBSERVE_API_KEY is not a key this backend recognises. Issue one with `make key NAME=...`.";
+  } else if (error instanceof ApiError && error.status === 403) {
+    // A valid key without the "read" scope. Distinct from 401 on purpose:
+    // replacing the key with another ingest key would not help, so the message
+    // has to name the scope rather than say "rejected".
+    title = "API key cannot read traces";
+    detail =
+      "This key authenticates but lacks the 'read' scope. Issue one with: make key NAME=<project> ARGS=\"--add --scopes read\"";
   } else if (error instanceof ApiError && error.status === 0) {
     title = "Backend unreachable";
     detail = `${error.message} Check that the API is running and API_BASE_URL points at it.`;

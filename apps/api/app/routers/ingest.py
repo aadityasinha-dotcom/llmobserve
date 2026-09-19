@@ -28,7 +28,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
-from app.deps import CurrentProjectId, SdkVersion, TenantSession
+from app.deps import CurrentProjectId, RequireIngest, SdkVersion, TenantSession
 from app.models import Observation, Trace
 from app.schemas.ingest import (
     IngestAccepted,
@@ -355,7 +355,8 @@ async def _insert_observations(session: AsyncSession, rows: Sequence[dict[str, A
     status_code=status.HTTP_202_ACCEPTED,
     summary="Ingest a batch of traces and observations",
     responses={
-        401: {"description": "Missing or unrecognised API key"},
+        401: {"description": "Missing, unrecognised, or revoked API key"},
+        403: {"description": "Key lacks the 'ingest' scope"},
         413: {"description": "Batch exceeds the configured size limits"},
     },
 )
@@ -364,6 +365,9 @@ async def ingest(
     project_id: CurrentProjectId,
     session: TenantSession,
     sdk_version: SdkVersion,
+    # Declared for its side effect: 403 unless the key carries "ingest". A
+    # read-only dashboard key must not be able to write traces.
+    _scope: RequireIngest,
 ) -> IngestAccepted:
     """Accept a batch, write it, and return.
 

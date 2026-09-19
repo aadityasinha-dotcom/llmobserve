@@ -11,7 +11,7 @@
           "ops"
         ],
         "summary": "Healthz",
-        "description": "Liveness. Deliberately does not touch the database.",
+        "description": "Liveness. Deliberately does not touch the database.\n\nStill fails when configuration is invalid: an instance that cannot read its\nown settings cannot serve, and reporting \"ok\" would hide that.",
         "operationId": "healthz_healthz_get",
         "responses": {
           "200": {
@@ -110,7 +110,10 @@
             }
           },
           "401": {
-            "description": "Missing or unrecognised API key"
+            "description": "Missing, unrecognised, or revoked API key"
+          },
+          "403": {
+            "description": "Key lacks the 'ingest' scope"
           },
           "413": {
             "description": "Batch exceeds the configured size limits"
@@ -280,7 +283,10 @@
             "description": "Malformed cursor"
           },
           "401": {
-            "description": "Missing or unrecognised API key"
+            "description": "Missing, unrecognised, or revoked API key"
+          },
+          "403": {
+            "description": "Key lacks the 'read' scope"
           },
           "422": {
             "description": "Validation Error",
@@ -332,7 +338,10 @@
             }
           },
           "401": {
-            "description": "Missing or unrecognised API key"
+            "description": "Missing, unrecognised, or revoked API key"
+          },
+          "403": {
+            "description": "Key lacks the 'read' scope"
           },
           "404": {
             "description": "No such trace in this project"

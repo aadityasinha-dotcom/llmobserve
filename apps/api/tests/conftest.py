@@ -59,6 +59,44 @@ class Tenant:
         return {"Authorization": f"Bearer {self.api_key}"}
 
 
+async def _insert_key(
+    conn: Any,
+    project_id: UUID,
+    raw_key: str,
+    scopes: list[str],
+    label: str | None = None,
+    revoked: bool = False,
+) -> None:
+    await conn.execute(
+        text(
+            "INSERT INTO api_keys (project_id, key_hash, key_prefix, label, scopes, revoked_at) "
+            "VALUES (:p, :h, :pre, :l, :s, CASE WHEN :rev THEN now() ELSE NULL END)"
+        ),
+        {
+            "p": project_id,
+            "h": hash_api_key(raw_key),
+            "pre": raw_key[:16],
+            "l": label,
+            "s": scopes,
+            "rev": revoked,
+        },
+    )
+
+
+async def issue_key(
+    admin_engine: Any,
+    project_id: UUID,
+    scopes: list[str],
+    label: str | None = None,
+    revoked: bool = False,
+) -> str:
+    """Mint an extra key for a project and return the raw value."""
+    raw_key = f"sk-test-{uuid4().hex}"
+    async with admin_engine.begin() as conn:
+        await _insert_key(conn, project_id, raw_key, scopes, label, revoked)
+    return raw_key
+
+
 def _admin_url() -> str:
     for var in ("MIGRATION_DATABASE_URL", "SUPABASE_MIGRATION_URL"):
         url = os.environ.get(var)
@@ -105,17 +143,14 @@ async def tenants(admin_engine: Any) -> AsyncIterator[tuple[Tenant, Tenant]]:
 
     async with admin_engine.begin() as conn:
         await conn.execute(
-            text(
-                "INSERT INTO projects (id, name, api_key_hash) "
-                "VALUES (:ia, 'test-A', :ha), (:ib, 'test-B', :hb)"
-            ),
-            {
-                "ia": a.project_id,
-                "ha": hash_api_key(a.api_key),
-                "ib": b.project_id,
-                "hb": hash_api_key(b.api_key),
-            },
+            text("INSERT INTO projects (id, name) VALUES (:ia, 'test-A'), (:ib, 'test-B')"),
+            {"ia": a.project_id, "ib": b.project_id},
         )
+        # Full-scope keys: most tests are not about authorisation, and a narrow
+        # default would make every unrelated test assert scopes it does not care
+        # about. Scope-specific tests mint their own with issue_key().
+        for tenant in (a, b):
+            await _insert_key(conn, tenant.project_id, tenant.api_key, ["ingest", "read"], "test")
     try:
         yield a, b
     finally:

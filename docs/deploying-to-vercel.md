@@ -125,10 +125,34 @@ Import the **same repo** a second time:
 | Name | Value |
 |---|---|
 | `API_BASE_URL` | `https://llm-observe-api.vercel.app`, no trailing slash |
-| `LLMOBSERVE_API_KEY` | a project key from `make key` |
+| `LLMOBSERVE_API_KEY` | a **read-only** key: `make key NAME=<project> ARGS="--add --scopes read --label dashboard"` |
 
 Neither is `NEXT_PUBLIC_`, so neither reaches the browser. The dashboard calls
 the API from the server.
+
+### Lock the dashboard down before sharing the URL
+
+The dashboard has no authentication of its own. It holds one project API key
+server-side and renders everything that key can read. Give it a **read-only**
+key so a leak cannot be used to forge traces, and so revoking it does not touch
+the SDK's - including the full
+`input` and `output` payloads on the trace detail page, which are your prompts
+and model responses. A public URL is therefore a public read of every trace in
+that project.
+
+On the **web** project: **Settings → Deployment Protection → Vercel
+Authentication**, scope **All Deployments**. That covers the production domain,
+not just previews, and is free on every plan. Access is then limited to users
+signed in to the Vercel account.
+
+**Do not enable this on the API project.** The SDK, CI and anything else calling
+`/v1/ingest` are not signed in to Vercel, so protecting the API's production
+domain returns Vercel's login page to them instead of the API - the SDK reads
+that 401 as a bad key and silently drops the batch. Leave the API on the default
+scope, which leaves production domains reachable.
+
+When the dashboard eventually grows real per-user login, this becomes redundant;
+until then it is the only thing standing between the URL and the payloads.
 
 ---
 
@@ -183,6 +207,8 @@ enqueue to a hosted Redis.
 | Every call slow, not only the first | Function region is not `bom1`. Check the deployment's function region |
 | Dashboard: "Backend unreachable" | `API_BASE_URL` wrong, or has a trailing path |
 | Dashboard: "API key rejected" | Key not issued against this database, or you hit a protected deployment URL |
+| Dashboard: "API key cannot read traces" | The key lacks the `read` scope. Issue one with `ARGS="--add --scopes read"` |
+| SDK logs a 403 | The key lacks the `ingest` scope |
 | SDK: silent, nothing lands | `LLM_METRICS_DEBUG` unset. Set it and re-run |
 | `ModuleNotFoundError` in function logs | A runtime dependency is missing from `apps/api/requirements.txt`. `tests/test_vercel_packaging.py` should have caught it |
 | **Every path 404s with `{"detail":"Not Found"}`** | A `rewrites`/`routes` block in `vercel.json` is rewriting the path. Remove it; Vercel routes to the entrypoint on its own |

@@ -2,8 +2,9 @@
 
 import hashlib
 import logging
-from collections.abc import AsyncIterator
-from typing import Annotated
+from collections.abc import AsyncIterator, Callable, Coroutine
+from dataclasses import dataclass
+from typing import Annotated, Any
 from uuid import UUID
 
 from fastapi import Depends, Header, HTTPException, status
@@ -12,7 +13,7 @@ from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import check_database_ready, get_sessionmaker, session_scope
-from app.models import Project
+from app.models import INGEST_SCOPE, READ_SCOPE, ApiKey
 
 logger = logging.getLogger(__name__)
 
@@ -41,15 +42,31 @@ def hash_api_key(raw_key: str) -> str:
     return hashlib.sha256(raw_key.encode("utf-8")).hexdigest()
 
 
-async def get_project_id(
+@dataclass(frozen=True)
+class Principal:
+    """The authenticated caller: which project, and what it may do."""
+
+    project_id: UUID
+    key_id: UUID
+    scopes: frozenset[str]
+
+    def can(self, scope: str) -> bool:
+        return scope in self.scopes
+
+
+async def get_principal(
     credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(_bearer)],
     session: Annotated[AsyncSession, Depends(session_scope)],
-) -> UUID:
-    """Resolve `Authorization: Bearer <api_key>` to a project id.
+) -> Principal:
+    """Resolve `Authorization: Bearer <api_key>` to a project and its scopes.
 
-    Raises 401 for a missing header, a non-Bearer scheme, or a key that matches
-    no project. The failure modes are deliberately indistinguishable to the
-    caller.
+    Raises 401 for a missing header, a non-Bearer scheme, a key that matches no
+    row, or a key that has been revoked. The failure modes are deliberately
+    indistinguishable to the caller: telling someone that a key is real but
+    revoked confirms that it was once valid.
+
+    Revocation is checked here rather than by deleting the row, so a revoked
+    hash can never be reissued to a different project.
     """
     if credentials is None or credentials.scheme.lower() != "bearer":
         raise _UNAUTHORIZED
@@ -58,16 +75,59 @@ async def get_project_id(
     if not raw_key:
         raise _UNAUTHORIZED
 
-    project_id = await session.scalar(
-        select(Project.id).where(Project.api_key_hash == hash_api_key(raw_key))
-    )
-    if project_id is None:
+    row = (
+        await session.execute(
+            select(ApiKey.id, ApiKey.project_id, ApiKey.scopes).where(
+                ApiKey.key_hash == hash_api_key(raw_key),
+                ApiKey.revoked_at.is_(None),
+            )
+        )
+    ).first()
+    if row is None:
         raise _UNAUTHORIZED
 
-    return project_id
+    return Principal(project_id=row.project_id, key_id=row.id, scopes=frozenset(row.scopes))
+
+
+CurrentPrincipal = Annotated[Principal, Depends(get_principal)]
+
+
+async def get_project_id(principal: CurrentPrincipal) -> UUID:
+    """The authenticated project. Kept as its own dependency because the tenant
+    session needs the project id without caring which scopes came with it."""
+    return principal.project_id
 
 
 CurrentProjectId = Annotated[UUID, Depends(get_project_id)]
+
+
+def require_scope(scope: str) -> Callable[[Principal], Coroutine[Any, Any, Principal]]:
+    """Build a dependency that admits only keys carrying `scope`.
+
+    403, not 401: the caller authenticated successfully, so re-presenting the
+    credential will not help, and a 401 would invite a client to retry or prompt
+    for another key. The message names the scope required because that is the
+    fix, and it discloses nothing the key holder does not already have.
+    """
+
+    async def _guard(principal: CurrentPrincipal) -> Principal:
+        if not principal.can(scope):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=(
+                    f"This API key does not carry the '{scope}' scope. "
+                    f'Issue one with: make key NAME=<project> ARGS="--add --scopes {scope}"'
+                ),
+            )
+        return principal
+
+    return _guard
+
+
+#: Write path. An SDK key needs nothing more than this.
+RequireIngest = Annotated[Principal, Depends(require_scope(INGEST_SCOPE))]
+#: Read path. The dashboard needs only this, and must not be able to write.
+RequireRead = Annotated[Principal, Depends(require_scope(READ_SCOPE))]
 
 
 # Set once this process has confirmed its database role cannot bypass RLS.

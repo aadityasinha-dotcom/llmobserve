@@ -125,34 +125,22 @@ Import the **same repo** a second time:
 | Name | Value |
 |---|---|
 | `API_BASE_URL` | `https://llm-observe-api.vercel.app`, no trailing slash |
-| `LLMOBSERVE_API_KEY` | a **read-only** key: `make key NAME=<project> ARGS="--add --scopes read --label dashboard"` |
+| `GOOGLE_CLIENT_ID` | the Google OAuth client ID — see `docs/google-sign-in.md` |
 
 Neither is `NEXT_PUBLIC_`, so neither reaches the browser. The dashboard calls
 the API from the server.
 
-### Lock the dashboard down before sharing the URL
+### Sign-in
 
-The dashboard has no authentication of its own. It holds one project API key
-server-side and renders everything that key can read. Give it a **read-only**
-key so a leak cannot be used to forge traces, and so revoking it does not touch
-the SDK's - including the full
-`input` and `output` payloads on the trace detail page, which are your prompts
-and model responses. A public URL is therefore a public read of every trace in
-that project.
+The dashboard authenticates people with Google and shows each user only the
+projects they belong to. It holds no API key. Setup - the Google Cloud client,
+the API's secrets, and claiming existing projects - is in
+`docs/google-sign-in.md`.
 
-On the **web** project: **Settings → Deployment Protection → Vercel
-Authentication**, scope **All Deployments**. That covers the production domain,
-not just previews, and is free on every plan. Access is then limited to users
-signed in to the Vercel account.
-
-**Do not enable this on the API project.** The SDK, CI and anything else calling
-`/v1/ingest` are not signed in to Vercel, so protecting the API's production
-domain returns Vercel's login page to them instead of the API - the SDK reads
-that 401 as a bad key and silently drops the batch. Leave the API on the default
-scope, which leaves production domains reachable.
-
-When the dashboard eventually grows real per-user login, this becomes redundant;
-until then it is the only thing standing between the URL and the payloads.
+**Turn Deployment Protection off for the dashboard project** (or leave it on
+Standard Protection). With Vercel Authentication in front of it, visitors would
+need a Vercel login before they ever reached the Google sign-in page. Keep it
+off for the API project too, as before.
 
 ---
 

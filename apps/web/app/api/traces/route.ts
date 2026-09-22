@@ -3,21 +3,18 @@ import { NextResponse, type NextRequest } from "next/server";
 import { MissingApiConfigError } from "@/lib/api/config";
 import { ApiError } from "@/lib/api/errors";
 import { apiRequestRaw } from "@/lib/api/fetch";
+import { PROJECT_COOKIE } from "@/lib/auth/cookies";
 
 /**
- * Proxies the trace list to the backend, attaching the API key server-side.
+ * Proxies the trace list to the backend as the signed-in user.
  *
- * The browser calls this route; only this route knows LLMOBSERVE_API_KEY. The
- * backend's response is re-emitted rather than forwarded verbatim so no backend
+ * The browser calls this route with its httpOnly session cookie; the route
+ * forwards that session as a bearer token, so the backend applies exactly the
+ * user's own memberships. The dashboard holds no credential of its own - with
+ * no session the backend answers 401 and that is what the browser gets.
+ *
+ * The response is re-emitted rather than forwarded verbatim so no backend
  * header (cookies, internal routing hints) reaches the client.
- *
- * ASSUMPTION — the openapi.json in this repo declares no read endpoints at all
- * (only /healthz, /readyz and POST /v1/ingest), so the path and query names
- * below are not yet backed by the contract and this route will 404 until the
- * backend ships trace reads. The response body is deliberately typed `unknown`:
- * inventing a TraceListResponse interface here would be exactly the
- * hand-written API type the project forbids. When the backend publishes the
- * endpoint, run `make types` and type the payload from the generated schema.
  */
 const BACKEND_TRACES_PATH = "/v1/traces";
 
@@ -62,9 +59,13 @@ export async function GET(request: NextRequest) {
   const query = buildQuery(request.nextUrl.searchParams);
 
   try {
+    // The selected project, as-is from the cookie. The backend checks the
+    // user's membership, so a forged value gets a 404, never another's data.
+    const projectId = request.cookies.get(PROJECT_COOKIE)?.value;
     const response = await apiRequestRaw("get", BACKEND_TRACES_PATH, {
       query,
       signal: request.signal,
+      headers: projectId ? { "x-project-id": projectId } : undefined,
     });
 
     const text = await response.text();

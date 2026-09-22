@@ -1,8 +1,9 @@
 import Link from "next/link";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 
 import { SpanTree, TraceIdBadge } from "@/components/traces/span-tree";
 import { ApiError, MissingApiConfigError, apiGet } from "@/lib/api";
+import { projectHeader, requireContext } from "@/lib/auth/session";
 import {
   formatCostUsd,
   formatDuration,
@@ -27,13 +28,21 @@ export default async function TraceDetailPage({
   // 200. Checked before the fetch so a crafted path costs no backend work.
   if (!UUID_PATTERN.test(id)) notFound();
 
+  // Outside the try: redirect() works by throwing, and the catch below would
+  // swallow a session-expiry redirect and render an error page instead.
+  const { project } = await requireContext();
+
   let trace;
   try {
     // Path params are substituted and percent-encoded by the wrapper; the
     // contract makes `path` required for this operation, so a missing id is a
     // type error rather than a request to a literal "{trace_id}".
-    trace = await apiGet("/v1/traces/{trace_id}", { path: { trace_id: id } });
+    trace = await apiGet("/v1/traces/{trace_id}", {
+      path: { trace_id: id },
+      headers: projectHeader(project),
+    });
   } catch (error) {
+    if (error instanceof ApiError && error.isUnauthorized) redirect("/auth/expired");
     // A trace in another project is a 404 from the API by design — it never
     // confirms that an id exists elsewhere — so this is the same page a
     // genuinely missing id gets.

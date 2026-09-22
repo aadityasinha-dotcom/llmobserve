@@ -1,5 +1,7 @@
 import "server-only";
 
+import { getSessionToken } from "@/lib/auth/cookies";
+
 import { getApiConfig } from "./config";
 import { ApiError } from "./errors";
 import type { paths } from "./schema";
@@ -53,6 +55,8 @@ interface CommonOptions {
   /** Defaults to "no-store": observability data is never worth serving stale. */
   cache?: RequestCache;
   next?: { revalidate?: number | false; tags?: string[] };
+  /** Send no credentials. Only the sign-in exchange needs this. */
+  anonymous?: boolean;
 }
 
 type QueryOption<O> = [QueryOf<O>] extends [never]
@@ -144,18 +148,32 @@ export async function apiRequestRaw(
     signal?: AbortSignal;
     cache?: RequestCache;
     next?: { revalidate?: number | false; tags?: string[] };
+    /** Send no credentials. Only the sign-in exchange needs this. */
+    anonymous?: boolean;
   } = {},
 ): Promise<Response> {
-  const { baseUrl, apiKey } = getApiConfig();
+  const { baseUrl } = getApiConfig();
   const resolved = applyPathParams(path, init.path);
   const url = `${baseUrl}${resolved}${toSearchParams(init.query)}`;
 
   const headers: Record<string, string> = {
     accept: "application/json",
     ...init.headers,
-    // Last, so a caller can never accidentally overwrite credentials.
-    authorization: `Bearer ${apiKey}`,
   };
+
+  if (!init.anonymous) {
+    // The signed-in user's own session, read from their httpOnly cookie. The
+    // dashboard holds no credential of its own: without a session there is
+    // nothing to send, and the API answers 401, which the pages turn into a
+    // redirect to /login.
+    const session = await getSessionToken();
+    if (session) headers.authorization = `Bearer ${session}`;
+    // X-Project-Id is deliberately NOT added here from the cookie. Callers
+    // pass it explicitly after resolving it against the user's real
+    // memberships (lib/auth/session.ts), so a stale cookie for a project the
+    // user has since left falls back to one they can see instead of 404ing
+    // every page.
+  }
   if (init.body !== undefined) headers["content-type"] = "application/json";
 
   try {
@@ -176,7 +194,12 @@ export async function apiRequestRaw(
 async function request(
   method: string,
   path: string,
-  options: CommonOptions & { query?: unknown; path?: unknown; body?: unknown },
+  options: CommonOptions & {
+    query?: unknown;
+    path?: unknown;
+    body?: unknown;
+    anonymous?: boolean;
+  },
 ): Promise<unknown> {
   const response = await apiRequestRaw(method, path, options);
   const body = await readBody(response);
@@ -204,4 +227,11 @@ export async function apiPost<P extends PathsWith<"post">>(
   options: BodyOptions<Operation<P, "post">>,
 ): Promise<SuccessBody<Operation<P, "post">>> {
   return (await request("post", path, options)) as SuccessBody<Operation<P, "post">>;
+}
+
+export async function apiDelete<P extends PathsWith<"delete">>(
+  path: P,
+  options: GetOptions<Operation<P, "delete">>,
+): Promise<void> {
+  await request("delete", path, options);
 }

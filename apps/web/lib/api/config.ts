@@ -3,14 +3,16 @@ import "server-only";
 /**
  * Backend connection details.
  *
- * Both values are server-only. `server-only` above makes importing this from a
- * client component a build error, which is the enforcement behind "the API key
- * never reaches the browser" — neither var is `NEXT_PUBLIC_`, so they are not
- * inlined into the client bundle.
+ * The dashboard holds no API key any more. It authenticates each request as the
+ * signed-in user, with the session token the API issued at sign-in (see
+ * lib/auth). What remains here is where the API is, and the Google OAuth client
+ * id needed to build the sign-in redirect - a public identifier, not a secret.
+ * Google's client *secret* lives only in the API.
+ *
+ * `server-only` makes importing this from a client component a build error.
  */
 export interface ApiConfig {
   baseUrl: string;
-  apiKey: string;
 }
 
 export class MissingApiConfigError extends Error {
@@ -25,10 +27,12 @@ export class MissingApiConfigError extends Error {
 export function getApiConfig(): ApiConfig {
   const baseUrl = process.env.API_BASE_URL;
   if (!baseUrl) throw new MissingApiConfigError("API_BASE_URL");
-
-  const apiKey = process.env.LLMOBSERVE_API_KEY;
-  if (!apiKey) throw new MissingApiConfigError("LLMOBSERVE_API_KEY");
-
   // Trailing slash here plus a leading slash on every path would produce "//".
-  return { baseUrl: baseUrl.replace(/\/+$/, ""), apiKey };
+  return { baseUrl: baseUrl.replace(/\/+$/, "") };
+}
+
+export function getGoogleClientId(): string {
+  const clientId = process.env.GOOGLE_CLIENT_ID;
+  if (!clientId) throw new MissingApiConfigError("GOOGLE_CLIENT_ID");
+  return clientId;
 }

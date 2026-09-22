@@ -1,16 +1,16 @@
 import { CopyableSnippet } from "./copyable-snippet";
 
-const SNIPPET = `pip install llmobserve
+const SNIPPET = `pip install llm-metrics
 
-import llmobserve
+# export LLM_METRICS_API_KEY=<an ingest key from Settings → API keys>
+# export LLM_METRICS_HOST=<this deployment's API URL>
+from llm_metrics import observe
 
-llmobserve.init(
-    api_key="<your project key>",
-    base_url="http://localhost:8000",
-)
+@observe(name="hello")
+def handle(question: str) -> str:
+    ...  # your LLM call here
 
-with llmobserve.trace(name="hello"):
-    ...  # your LLM call here`;
+handle("hi")`;
 
 /**
  * Shown when a project has no traces at all.
@@ -31,11 +31,9 @@ export function NoTracesYet() {
         </p>
         <CopyableSnippet code={SNIPPET} />
         <p className="mt-3 text-xs text-muted-foreground">
-          Already sending traces? Check that{" "}
-          <code className="font-mono">API_BASE_URL</code> and{" "}
-          <code className="font-mono">LLMOBSERVE_API_KEY</code> in{" "}
-          <code className="font-mono">.env.local</code> point at the same project
-          the SDK is writing to.
+          Need a key? Create one with the <span className="font-mono">ingest</span> scope under{" "}
+          <a href="/settings/keys" className="underline">API keys</a>. Already sending traces?
+          Check that the SDK&apos;s key belongs to the project selected above.
         </p>
       </div>
     </div>

@@ -3,7 +3,10 @@ import { Suspense } from "react";
 
 import { NoMatchingTraces, NoTracesYet } from "@/components/traces/empty-state";
 import { TraceFilters } from "@/components/traces/trace-filters";
+import { redirect } from "next/navigation";
+
 import { ApiError, MissingApiConfigError, apiGet } from "@/lib/api";
+import { projectHeader, requireContext } from "@/lib/auth/session";
 import type { TraceListItem } from "@/lib/api/types";
 import {
   formatCostUsd,
@@ -81,9 +84,15 @@ async function TraceTableSection({ params }: { params: SearchParams }) {
   const trail = trailOf(params.cursor);
   const isFiltered = Boolean(name || from || to);
 
+  // Cached per request: the layout already resolved this.
+  const { project } = await requireContext();
+
   let page;
   try {
     page = await apiGet("/v1/traces", {
+      // The signed-in user's selected project. The API re-checks membership,
+      // and row-level security scopes the rows to it either way.
+      headers: projectHeader(project),
       query: {
         limit: PAGE_SIZE,
         // Undefined keys are dropped by the fetch wrapper, so an absent filter
@@ -274,9 +283,9 @@ function LoadFailure({ error }: { error: unknown }) {
     title = "Dashboard is not configured";
     detail = `${error.variable} is not set. Copy .env.example to .env.local and fill it in.`;
   } else if (error instanceof ApiError && error.isUnauthorized) {
-    title = "API key rejected";
-    detail =
-      "LLMOBSERVE_API_KEY is not a key this backend recognises. Issue one with `make key NAME=...`.";
+    // The session expired or was revoked between the layout's check and this
+    // query. Clear it and sign in again.
+    redirect("/auth/expired");
   } else if (error instanceof ApiError && error.status === 403) {
     // A valid key without the "read" scope. Distinct from 401 on purpose:
     // replacing the key with another ingest key would not help, so the message

@@ -72,6 +72,22 @@
         ],
         "parameters": [
           {
+            "name": "X-Project-Id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Project-Id"
+            }
+          },
+          {
             "name": "X-SDK-Version",
             "in": "header",
             "required": false,
@@ -266,6 +282,22 @@
               "title": "To"
             },
             "description": "Only traces with started_at < this (exclusive)."
+          },
+          {
+            "name": "X-Project-Id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Project-Id"
+            }
           }
         ],
         "responses": {
@@ -324,6 +356,22 @@
               "format": "uuid",
               "title": "Trace Id"
             }
+          },
+          {
+            "name": "X-Project-Id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Project-Id"
+            }
           }
         ],
         "responses": {
@@ -358,10 +406,479 @@
           }
         }
       }
+    },
+    "/v1/auth/google": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Complete a Google sign-in and receive a session token",
+        "operationId": "sign_in_with_google_v1_auth_google_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GoogleSignInRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionOut"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "redirect_uri is not an allowed sign-in destination"
+          },
+          "401": {
+            "description": "Google rejected the code, or the ID token failed verification"
+          },
+          "403": {
+            "description": "Unverified email, or sign-up is restricted"
+          },
+          "503": {
+            "description": "Sign-in is not configured on this API"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/me": {
+      "get": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "The signed-in user and their projects",
+        "operationId": "me_v1_me_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MeOut"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/v1/auth/logout": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Sign out everywhere",
+        "description": "Invalidate every session this user holds, on every device.\n\nStateless tokens cannot be deleted one at a time. Incrementing the user's\nsession_version makes every token carrying the old one fail verification,\nso this is sign-out-everywhere by construction. Clearing the dashboard's\ncookie alone would leave a copied token valid until it expired.",
+        "operationId": "logout_v1_auth_logout_post",
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/v1/projects/{project_id}/keys": {
+      "get": {
+        "tags": [
+          "api keys"
+        ],
+        "summary": "List a project's API keys",
+        "operationId": "list_keys_v1_projects__project_id__keys_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Project Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ApiKeyOut"
+                  },
+                  "title": "Response List Keys V1 Projects  Project Id  Keys Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "api keys"
+        ],
+        "summary": "Create an API key. The raw key is returned once.",
+        "operationId": "create_key_v1_projects__project_id__keys_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Project Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApiKeyCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiKeyCreated"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/projects/{project_id}/keys/{key_id}": {
+      "delete": {
+        "tags": [
+          "api keys"
+        ],
+        "summary": "Revoke an API key",
+        "operationId": "revoke_key_v1_projects__project_id__keys__key_id__delete",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Project Id"
+            }
+          },
+          {
+            "name": "key_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Key Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "404": {
+            "description": "No such active key in a project you belong to"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
     "schemas": {
+      "ApiKeyCreate": {
+        "properties": {
+          "label": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 255
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Label"
+          },
+          "scopes": {
+            "items": {
+              "type": "string",
+              "enum": [
+                "ingest",
+                "read"
+              ]
+            },
+            "type": "array",
+            "maxItems": 2,
+            "minItems": 1,
+            "title": "Scopes"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "scopes"
+        ],
+        "title": "ApiKeyCreate"
+      },
+      "ApiKeyCreated": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "key_prefix": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Key Prefix"
+          },
+          "label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Label"
+          },
+          "scopes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Scopes"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "revoked_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Revoked At"
+          },
+          "api_key": {
+            "type": "string",
+            "title": "Api Key"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "key_prefix",
+          "label",
+          "scopes",
+          "created_at",
+          "revoked_at",
+          "api_key"
+        ],
+        "title": "ApiKeyCreated"
+      },
+      "ApiKeyOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "key_prefix": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Key Prefix"
+          },
+          "label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Label"
+          },
+          "scopes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Scopes"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "revoked_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Revoked At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "key_prefix",
+          "label",
+          "scopes",
+          "created_at",
+          "revoked_at"
+        ],
+        "title": "ApiKeyOut"
+      },
+      "GoogleSignInRequest": {
+        "properties": {
+          "code": {
+            "type": "string",
+            "maxLength": 2048,
+            "minLength": 1,
+            "title": "Code"
+          },
+          "code_verifier": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 43,
+            "title": "Code Verifier"
+          },
+          "redirect_uri": {
+            "type": "string",
+            "maxLength": 2048,
+            "minLength": 1,
+            "title": "Redirect Uri"
+          },
+          "nonce": {
+            "type": "string",
+            "maxLength": 256,
+            "minLength": 16,
+            "title": "Nonce"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "code",
+          "code_verifier",
+          "redirect_uri",
+          "nonce"
+        ],
+        "title": "GoogleSignInRequest",
+        "description": "What the dashboard forwards after Google redirects back to it.\n\n`extra=\"forbid\"`, unlike the ingest schemas: this is not a versioned SDK\ncontract that must tolerate newer clients, it is our own dashboard, and an\nunexpected field here is a bug worth failing loudly on."
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -683,6 +1200,26 @@
         "title": "IngestTrace",
         "description": "One logical run through the client application, with its observations nested."
       },
+      "MeOut": {
+        "properties": {
+          "user": {
+            "$ref": "#/components/schemas/UserOut"
+          },
+          "projects": {
+            "items": {
+              "$ref": "#/components/schemas/ProjectOut"
+            },
+            "type": "array",
+            "title": "Projects"
+          }
+        },
+        "type": "object",
+        "required": [
+          "user",
+          "projects"
+        ],
+        "title": "MeOut"
+      },
       "ObservationDetail": {
         "properties": {
           "id": {
@@ -869,6 +1406,62 @@
         ],
         "title": "ObservationDetail",
         "description": "One observation, with its payloads.\n\nReturned flat, with `parent_observation_id` intact, ordered by started_at so\nthe client can assemble the tree in a single pass.\n\nA dangling `parent_observation_id` is normal, not corrupt: the column carries\nno foreign key on purpose, because batches split and retry independently and\na parent may still be in flight. Render an orphan at the root; do not drop it."
+      },
+      "ProjectOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "owner",
+              "member"
+            ],
+            "title": "Role"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "role"
+        ],
+        "title": "ProjectOut"
+      },
+      "SessionOut": {
+        "properties": {
+          "session_token": {
+            "type": "string",
+            "title": "Session Token"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Expires At"
+          },
+          "user": {
+            "$ref": "#/components/schemas/UserOut"
+          },
+          "created": {
+            "type": "boolean",
+            "title": "Created"
+          }
+        },
+        "type": "object",
+        "required": [
+          "session_token",
+          "expires_at",
+          "user",
+          "created"
+        ],
+        "title": "SessionOut"
       },
       "TraceDetail": {
         "properties": {
@@ -1179,6 +1772,47 @@
         "title": "TraceListResponse",
         "description": "A page of traces plus the cursor that continues it.\n\n`next_cursor` is opaque and must be echoed back verbatim. It encodes the\n(started_at, id) of the last row on this page, which is what makes paging\nstable when traces share a timestamp - id breaks the tie and the seek uses\nthe same pair the ORDER BY does."
       },
+      "UserOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "email": {
+            "type": "string",
+            "title": "Email"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "avatar_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Avatar Url"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "email"
+        ],
+        "title": "UserOut"
+      },
       "ValidationError": {
         "properties": {
           "loc": {
@@ -1223,7 +1857,7 @@
     "securitySchemes": {
       "HTTPBearer": {
         "type": "http",
-        "description": "API key issued for a project",
+        "description": "A project API key, or a dashboard session token from /v1/auth/google",
         "scheme": "bearer"
       }
     }

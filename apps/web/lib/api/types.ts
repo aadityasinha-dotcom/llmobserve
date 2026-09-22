@@ -34,3 +34,11 @@ export type ObservationId = ObservationDetail["id"];
  * to avoid. Format it for display; do not do arithmetic on it here.
  */
 export type CostUsd = TraceListItem["total_cost_usd"];
+
+/** The signed-in user and every project they can select. */
+export type Me = components["schemas"]["MeOut"];
+export type Project = components["schemas"]["ProjectOut"];
+export type SessionOut = components["schemas"]["SessionOut"];
+export type ApiKey = components["schemas"]["ApiKeyOut"];
+/** Carries the raw key. Returned once, at creation, and never again. */
+export type ApiKeyCreated = components["schemas"]["ApiKeyCreated"];

@@ -133,10 +133,173 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/auth/google": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Complete a Google sign-in and receive a session token */
+        post: operations["sign_in_with_google_v1_auth_google_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/me": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The signed-in user and their projects */
+        get: operations["me_v1_me_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/auth/logout": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Sign out everywhere
+         * @description Invalidate every session this user holds, on every device.
+         *
+         *     Stateless tokens cannot be deleted one at a time. Incrementing the user's
+         *     session_version makes every token carrying the old one fail verification,
+         *     so this is sign-out-everywhere by construction. Clearing the dashboard's
+         *     cookie alone would leave a copied token valid until it expired.
+         */
+        post: operations["logout_v1_auth_logout_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/projects/{project_id}/keys": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List a project's API keys */
+        get: operations["list_keys_v1_projects__project_id__keys_get"];
+        put?: never;
+        /** Create an API key. The raw key is returned once. */
+        post: operations["create_key_v1_projects__project_id__keys_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/projects/{project_id}/keys/{key_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Revoke an API key */
+        delete: operations["revoke_key_v1_projects__project_id__keys__key_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** ApiKeyCreate */
+        ApiKeyCreate: {
+            /** Label */
+            label?: string | null;
+            /** Scopes */
+            scopes: ("ingest" | "read")[];
+        };
+        /** ApiKeyCreated */
+        ApiKeyCreated: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Key Prefix */
+            key_prefix: string | null;
+            /** Label */
+            label: string | null;
+            /** Scopes */
+            scopes: string[];
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Revoked At */
+            revoked_at: string | null;
+            /** Api Key */
+            api_key: string;
+        };
+        /** ApiKeyOut */
+        ApiKeyOut: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Key Prefix */
+            key_prefix: string | null;
+            /** Label */
+            label: string | null;
+            /** Scopes */
+            scopes: string[];
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Revoked At */
+            revoked_at: string | null;
+        };
+        /**
+         * GoogleSignInRequest
+         * @description What the dashboard forwards after Google redirects back to it.
+         *
+         *     `extra="forbid"`, unlike the ingest schemas: this is not a versioned SDK
+         *     contract that must tolerate newer clients, it is our own dashboard, and an
+         *     unexpected field here is a bug worth failing loudly on.
+         */
+        GoogleSignInRequest: {
+            /** Code */
+            code: string;
+            /** Code Verifier */
+            code_verifier: string;
+            /** Redirect Uri */
+            redirect_uri: string;
+            /** Nonce */
+            nonce: string;
+        };
         /** HTTPValidationError */
         HTTPValidationError: {
             /** Detail */
@@ -268,6 +431,12 @@ export interface components {
             /** Observations */
             observations?: components["schemas"]["IngestObservation"][];
         };
+        /** MeOut */
+        MeOut: {
+            user: components["schemas"]["UserOut"];
+            /** Projects */
+            projects: components["schemas"]["ProjectOut"][];
+        };
         /**
          * ObservationDetail
          * @description One observation, with its payloads.
@@ -332,6 +501,34 @@ export interface components {
             started_at: string;
             /** Ended At */
             ended_at?: string | null;
+        };
+        /** ProjectOut */
+        ProjectOut: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Name */
+            name: string;
+            /**
+             * Role
+             * @enum {string}
+             */
+            role: "owner" | "member";
+        };
+        /** SessionOut */
+        SessionOut: {
+            /** Session Token */
+            session_token: string;
+            /**
+             * Expires At
+             * Format: date-time
+             */
+            expires_at: string;
+            user: components["schemas"]["UserOut"];
+            /** Created */
+            created: boolean;
         };
         /**
          * TraceDetail
@@ -497,6 +694,20 @@ export interface components {
              */
             has_more: boolean;
         };
+        /** UserOut */
+        UserOut: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Email */
+            email: string;
+            /** Name */
+            name?: string | null;
+            /** Avatar Url */
+            avatar_url?: string | null;
+        };
         /** ValidationError */
         ValidationError: {
             /** Location */
@@ -567,6 +778,7 @@ export interface operations {
         parameters: {
             query?: never;
             header?: {
+                "X-Project-Id"?: string | null;
                 "X-SDK-Version"?: string | null;
             };
             path?: never;
@@ -636,7 +848,9 @@ export interface operations {
                 /** @description Only traces with started_at < this (exclusive). */
                 to?: string | null;
             };
-            header?: never;
+            header?: {
+                "X-Project-Id"?: string | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -686,7 +900,9 @@ export interface operations {
     get_trace_v1_traces__trace_id__get: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "X-Project-Id"?: string | null;
+            };
             path: {
                 trace_id: string;
             };
@@ -718,6 +934,208 @@ export interface operations {
                 content?: never;
             };
             /** @description No such trace in this project */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    sign_in_with_google_v1_auth_google_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GoogleSignInRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionOut"];
+                };
+            };
+            /** @description redirect_uri is not an allowed sign-in destination */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Google rejected the code, or the ID token failed verification */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Unverified email, or sign-up is restricted */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Sign-in is not configured on this API */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    me_v1_me_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MeOut"];
+                };
+            };
+        };
+    };
+    logout_v1_auth_logout_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    list_keys_v1_projects__project_id__keys_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiKeyOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_key_v1_projects__project_id__keys_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ApiKeyCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiKeyCreated"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    revoke_key_v1_projects__project_id__keys__key_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: string;
+                key_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description No such active key in a project you belong to */
             404: {
                 headers: {
                     [name: string]: unknown;

@@ -14,6 +14,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import check_database_ready, get_sessionmaker, session_scope
 from app.models import INGEST_SCOPE, READ_SCOPE, ApiKey
+from app.services.sessions import (
+    InvalidSessionError,
+    looks_like_session_token,
+    verify_session_token,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -22,13 +27,32 @@ TENANT_GUC = "app.current_project_id"
 
 # auto_error=False so a missing header produces our own 401 with a
 # WWW-Authenticate challenge rather than FastAPI's bare 403.
-_bearer = HTTPBearer(auto_error=False, description="API key issued for a project")
+_bearer = HTTPBearer(
+    auto_error=False,
+    description="A project API key, or a dashboard session token from /v1/auth/google",
+)
 
 _UNAUTHORIZED = HTTPException(
     status_code=status.HTTP_401_UNAUTHORIZED,
     detail="Invalid or missing API key",
     headers={"WWW-Authenticate": "Bearer"},
 )
+
+_SESSION_UNAUTHORIZED = HTTPException(
+    status_code=status.HTTP_401_UNAUTHORIZED,
+    detail="Session is invalid or has expired. Sign in again.",
+    headers={"WWW-Authenticate": "Bearer"},
+)
+
+# A project the caller may not see gets the same answer as one that does not
+# exist, so the response never confirms that an id belongs to someone else.
+_PROJECT_NOT_FOUND = HTTPException(
+    status_code=status.HTTP_404_NOT_FOUND, detail="Project not found"
+)
+
+#: What a signed-in dashboard user may do with a project they belong to. Read
+#: only: traces arrive through API keys, never through a browser session.
+SESSION_SCOPES = frozenset({READ_SCOPE})
 
 
 def hash_api_key(raw_key: str) -> str:
@@ -44,41 +68,167 @@ def hash_api_key(raw_key: str) -> str:
 
 @dataclass(frozen=True)
 class Principal:
-    """The authenticated caller: which project, and what it may do."""
+    """The authenticated caller: which project, and what it may do there.
+
+    Exactly one of `key_id` and `user_id` is set, depending on whether the
+    caller presented an API key or a dashboard session.
+    """
 
     project_id: UUID
-    key_id: UUID
     scopes: frozenset[str]
+    key_id: UUID | None = None
+    user_id: UUID | None = None
 
     def can(self, scope: str) -> bool:
         return scope in self.scopes
 
 
+@dataclass(frozen=True)
+class SessionUser:
+    """A signed-in person, and every project they may select."""
+
+    user_id: UUID
+    email: str
+    name: str | None
+    avatar_url: str | None
+    # (project_id, name, role), oldest membership first so the default project
+    # is stable - it is the personal one created at sign-up.
+    projects: tuple[tuple[UUID, str, str], ...]
+
+    @property
+    def project_ids(self) -> frozenset[UUID]:
+        return frozenset(project_id for project_id, _, _ in self.projects)
+
+
+def _bearer_token(credentials: HTTPAuthorizationCredentials | None) -> str:
+    if credentials is None or credentials.scheme.lower() != "bearer":
+        raise _UNAUTHORIZED
+    token = credentials.credentials.strip()
+    if not token:
+        raise _UNAUTHORIZED
+    return token
+
+
+async def _load_session_user(token: str, session: AsyncSession) -> SessionUser:
+    """Verify a session token and load the user it names.
+
+    The signature proves the API issued it. The session_version comparison
+    proves the user has not signed out since: stateless tokens cannot be deleted,
+    so signing out moves the version on and every older token stops matching.
+    """
+    try:
+        claims = verify_session_token(token)
+    except InvalidSessionError:
+        raise _SESSION_UNAUTHORIZED from None
+
+    user = (
+        await session.execute(
+            text("SELECT id, email, name, avatar_url, session_version FROM users WHERE id = :u"),
+            {"u": claims.user_id},
+        )
+    ).first()
+    if user is None or user.session_version != claims.session_version:
+        raise _SESSION_UNAUTHORIZED
+
+    projects = (
+        await session.execute(
+            text(
+                "SELECT p.id, p.name, m.role FROM project_members m "
+                "JOIN projects p ON p.id = m.project_id "
+                "WHERE m.user_id = :u ORDER BY m.created_at, p.id"
+            ),
+            {"u": claims.user_id},
+        )
+    ).all()
+    return SessionUser(
+        user_id=user.id,
+        email=user.email,
+        name=user.name,
+        avatar_url=user.avatar_url,
+        projects=tuple((row.id, row.name, row.role) for row in projects),
+    )
+
+
+async def get_session_user(
+    credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(_bearer)],
+    session: Annotated[AsyncSession, Depends(session_scope)],
+) -> SessionUser:
+    """For routes that act on behalf of a person: /v1/me, key management.
+
+    An API key here is a 403, not a 401. It is a valid credential of the wrong
+    kind, and a key must never be able to mint further keys - otherwise leaking
+    an ingest key would leak the ability to issue a read key.
+    """
+    token = _bearer_token(credentials)
+    if not looks_like_session_token(token):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="This endpoint needs a signed-in dashboard user, not an API key.",
+        )
+    return await _load_session_user(token, session)
+
+
+CurrentUser = Annotated[SessionUser, Depends(get_session_user)]
+
+
+def resolve_project(user: SessionUser, requested: str | None) -> UUID:
+    """Pick the project a session request is about.
+
+    Explicit when the user has several (the dashboard sends X-Project-Id);
+    implicit when they have exactly one, which is every new user.
+    """
+    if requested is None:
+        if len(user.projects) == 1:
+            return user.projects[0][0]
+        if not user.projects:
+            raise _PROJECT_NOT_FOUND
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="You belong to several projects; send X-Project-Id to choose one.",
+        )
+    try:
+        project_id = UUID(requested)
+    except ValueError:
+        raise _PROJECT_NOT_FOUND from None
+    if project_id not in user.project_ids:
+        raise _PROJECT_NOT_FOUND
+    return project_id
+
+
 async def get_principal(
     credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(_bearer)],
     session: Annotated[AsyncSession, Depends(session_scope)],
+    x_project_id: Annotated[str | None, Header(alias="X-Project-Id")] = None,
 ) -> Principal:
-    """Resolve `Authorization: Bearer <api_key>` to a project and its scopes.
+    """Resolve the bearer credential to a project and what it may do there.
 
-    Raises 401 for a missing header, a non-Bearer scheme, a key that matches no
-    row, or a key that has been revoked. The failure modes are deliberately
-    indistinguishable to the caller: telling someone that a key is real but
-    revoked confirms that it was once valid.
+    Two kinds of credential share the header:
 
-    Revocation is checked here rather than by deleting the row, so a revoked
-    hash can never be reissued to a different project.
+    * **API key** - resolves to its project and its own scopes. X-Project-Id is
+      ignored: the key is authoritative about which project it belongs to.
+    * **Session token** - resolves to a user, then to the project named by
+      X-Project-Id, which must be one they are a member of. Sessions carry the
+      read scope only.
+
+    Unknown, revoked and expired credentials are all a 401, deliberately
+    indistinguishable: telling someone a key is real but revoked confirms it was
+    once valid. Revocation is a timestamp, never a delete, so a revoked hash
+    cannot be reissued to a different project.
     """
-    if credentials is None or credentials.scheme.lower() != "bearer":
-        raise _UNAUTHORIZED
+    token = _bearer_token(credentials)
 
-    raw_key = credentials.credentials.strip()
-    if not raw_key:
-        raise _UNAUTHORIZED
+    if looks_like_session_token(token):
+        user = await _load_session_user(token, session)
+        return Principal(
+            project_id=resolve_project(user, x_project_id),
+            scopes=SESSION_SCOPES,
+            user_id=user.user_id,
+        )
 
     row = (
         await session.execute(
             select(ApiKey.id, ApiKey.project_id, ApiKey.scopes).where(
-                ApiKey.key_hash == hash_api_key(raw_key),
+                ApiKey.key_hash == hash_api_key(token),
                 ApiKey.revoked_at.is_(None),
             )
         )
@@ -111,6 +261,14 @@ def require_scope(scope: str) -> Callable[[Principal], Coroutine[Any, Any, Princ
     """
 
     async def _guard(principal: CurrentPrincipal) -> Principal:
+        if not principal.can(scope) and principal.user_id is not None:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=(
+                    f"Dashboard sessions cannot use '{scope}'. "
+                    "Create an API key with that scope in Settings → API keys."
+                ),
+            )
         if not principal.can(scope):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,

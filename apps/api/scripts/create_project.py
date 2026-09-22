@@ -27,7 +27,6 @@ database, so a dump of `api_keys` cannot be replayed against the API.
 import argparse
 import asyncio
 import os
-import secrets
 import sys
 from pathlib import Path
 from uuid import UUID, uuid4
@@ -38,10 +37,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection, create_async_engine
 
-from app.deps import hash_api_key
 from app.models import VALID_SCOPES
-
-KEY_PREFIX = "llmo_sk_"
+from app.services.api_keys import generate_api_key
 
 
 def _admin_url() -> str:
@@ -70,7 +67,7 @@ def _parse_scopes(raw: str) -> list[str]:
 async def _issue_key(
     conn: AsyncConnection, project_id: UUID, scopes: list[str], label: str | None
 ) -> str:
-    api_key = KEY_PREFIX + secrets.token_urlsafe(32)
+    new_key = generate_api_key()
     await conn.execute(
         text(
             "INSERT INTO api_keys (project_id, key_hash, key_prefix, label, scopes) "
@@ -78,13 +75,13 @@ async def _issue_key(
         ),
         {
             "p": project_id,
-            "h": hash_api_key(api_key),
-            "pre": api_key[:16],
+            "h": new_key.key_hash,
+            "pre": new_key.display_prefix,
             "l": label,
             "s": scopes,
         },
     )
-    return api_key
+    return new_key.raw
 
 
 async def _project_id(conn: AsyncConnection, name: str) -> UUID | None:
@@ -125,11 +122,23 @@ async def main() -> None:
         "traces and observations - this destroys data.",
     )
     parser.add_argument("--list", action="store_true", help="List the project's keys and exit.")
+    parser.add_argument(
+        "--grant",
+        metavar="EMAIL",
+        help="Make an existing signed-up user a member of this project, so they "
+        "see its traces in the dashboard. They must have signed in once first. "
+        "This is how data created before sign-in existed gets an owner.",
+    )
+    parser.add_argument(
+        "--role", choices=("owner", "member"), default="owner", help="Role for --grant."
+    )
     args = parser.parse_args()
 
-    exclusive = [args.replace, args.rotate, args.add, bool(args.revoke), args.list]
+    exclusive = [args.replace, args.rotate, args.add, bool(args.revoke), args.list, args.grant]
     if sum(bool(flag) for flag in exclusive) > 1:
-        raise SystemExit("--add, --rotate, --revoke, --replace and --list are mutually exclusive.")
+        raise SystemExit(
+            "--add, --rotate, --revoke, --replace, --list and --grant are mutually exclusive."
+        )
 
     scopes = _parse_scopes(args.scopes)
     engine = create_async_engine(_admin_url())
@@ -139,6 +148,34 @@ async def main() -> None:
 
             if args.list:
                 await _print_keys(conn, args.name, existing)
+                return
+
+            if args.grant:
+                if existing is None:
+                    raise SystemExit(f"No project named {args.name!r}.")
+                users = (
+                    await conn.execute(
+                        text("SELECT id, email FROM users WHERE lower(email) = lower(:e)"),
+                        {"e": args.grant},
+                    )
+                ).all()
+                if not users:
+                    raise SystemExit(
+                        f"No user with email {args.grant!r}. Sign in to the dashboard once "
+                        "with that Google account, then re-run this."
+                    )
+                if len(users) > 1:
+                    raise SystemExit(f"Several users share {args.grant!r}; grant by id instead.")
+                await conn.execute(
+                    text(
+                        "INSERT INTO project_members (project_id, user_id, role) "
+                        "VALUES (:p, :u, :r) ON CONFLICT (project_id, user_id) "
+                        "DO UPDATE SET role = EXCLUDED.role"
+                    ),
+                    {"p": existing, "u": users[0].id, "r": args.role},
+                )
+                print(f"{users[0].email} is now {args.role} of {args.name}.")
+                print("It appears in the dashboard's project switcher on their next page load.")
                 return
 
             if args.revoke:

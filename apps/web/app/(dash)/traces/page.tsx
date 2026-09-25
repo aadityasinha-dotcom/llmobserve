@@ -2,12 +2,14 @@ import Link from "next/link";
 import { Suspense } from "react";
 
 import { NoMatchingTraces, NoTracesYet } from "@/components/traces/empty-state";
+import { TagChip } from "@/components/traces/scores";
 import { TraceFilters } from "@/components/traces/trace-filters";
 import { redirect } from "next/navigation";
 
 import { ApiError, MissingApiConfigError, apiGet } from "@/lib/api";
 import { projectHeader, requireContext } from "@/lib/auth/session";
 import type { TraceListItem } from "@/lib/api/types";
+import { hasAnyFilter, readFilters, writeFilters } from "@/lib/trace-filters";
 import {
   formatCostUsd,
   formatDuration,
@@ -27,11 +29,6 @@ const MAX_TRAIL = 50;
 
 type SearchParams = Record<string, string | string[] | undefined>;
 
-function one(value: string | string[] | undefined): string | undefined {
-  if (Array.isArray(value)) return value[value.length - 1];
-  return value ?? undefined;
-}
-
 /** The cursor trail: one entry per page visited, current page last. */
 function trailOf(value: string | string[] | undefined): string[] {
   if (value === undefined) return [];
@@ -40,10 +37,7 @@ function trailOf(value: string | string[] | undefined): string[] {
 
 function hrefWith(base: SearchParams, trail: string[]): string {
   const params = new URLSearchParams();
-  for (const key of ["name", "from", "to"] as const) {
-    const value = one(base[key]);
-    if (value) params.set(key, value);
-  }
+  writeFilters(readFilters(base), params);
   for (const cursor of trail) params.append("cursor", cursor);
   const query = params.toString();
   return query ? `/traces?${query}` : "/traces";
@@ -78,11 +72,9 @@ export default async function TracesPage({
 }
 
 async function TraceTableSection({ params }: { params: SearchParams }) {
-  const name = one(params.name);
-  const from = one(params.from);
-  const to = one(params.to);
+  const filters = readFilters(params);
   const trail = trailOf(params.cursor);
-  const isFiltered = Boolean(name || from || to);
+  const isFiltered = hasAnyFilter(filters);
 
   // Cached per request: the layout already resolved this.
   const { project } = await requireContext();
@@ -96,10 +88,16 @@ async function TraceTableSection({ params }: { params: SearchParams }) {
       query: {
         limit: PAGE_SIZE,
         // Undefined keys are dropped by the fetch wrapper, so an absent filter
-        // is genuinely absent rather than an empty-string match.
-        name,
-        from,
-        to,
+        // is genuinely absent rather than an empty-string match. Tags repeat
+        // as one parameter each; the wrapper expands the array.
+        name: filters.name,
+        user_id: filters.user_id,
+        session_id: filters.session_id,
+        environment: filters.environment,
+        release: filters.release,
+        tag: filters.tags.length > 0 ? filters.tags : undefined,
+        from: filters.from,
+        to: filters.to,
         cursor: trail.at(-1),
       },
     });
@@ -149,6 +147,8 @@ function TableSkeleton() {
       {Array.from({ length: 12 }).map((_, index) => (
         <div key={index} className="flex items-center gap-4 px-4 py-2.5">
           <div className="h-3 w-48 animate-pulse rounded bg-muted" />
+          <div className="h-3 w-12 animate-pulse rounded bg-muted" />
+          <div className="h-3 w-20 animate-pulse rounded bg-muted" />
           <div className="ml-auto h-3 w-16 animate-pulse rounded bg-muted" />
           <div className="h-3 w-12 animate-pulse rounded bg-muted" />
           <div className="h-3 w-16 animate-pulse rounded bg-muted" />
@@ -168,6 +168,8 @@ function TraceTable({ traces }: { traces: TraceListItem[] }) {
           <tr className="border-b border-border text-left text-[11px] uppercase tracking-wider text-muted-foreground">
             <th className="px-4 py-2 font-medium">Trace</th>
             <th className="px-3 py-2 font-medium">Started</th>
+            <th className="px-3 py-2 font-medium">Env</th>
+            <th className="px-3 py-2 font-medium">Tags</th>
             <th className="px-3 py-2 text-right font-medium">Obs</th>
             <th className="px-3 py-2 text-right font-medium">Tokens</th>
             <th className="px-3 py-2 text-right font-medium">Cost</th>
@@ -198,6 +200,33 @@ function TraceTable({ traces }: { traces: TraceListItem[] }) {
               <td className="px-3 py-2 whitespace-nowrap">
                 <span title={formatTimestamp(trace.started_at)}>
                   {formatRelative(trace.started_at)}
+                </span>
+              </td>
+              {/* Where it ran. The release is the thing that turns "the
+                  model got worse" into "we deployed", so it sits beside
+                  the environment rather than in a tooltip. */}
+              <td className="px-3 py-2 font-mono text-[11px] whitespace-nowrap">
+                {trace.environment ? (
+                  <Link
+                    href={`/traces?environment=${encodeURIComponent(trace.environment)}`}
+                    className="hover:underline"
+                  >
+                    {trace.environment}
+                  </Link>
+                ) : (
+                  <span className="text-muted-foreground">—</span>
+                )}
+                {trace.release && (
+                  <span className="ml-1.5 text-muted-foreground" title={trace.release}>
+                    {trace.release.slice(0, 12)}
+                  </span>
+                )}
+              </td>
+              <td className="px-3 py-2">
+                <span className="flex flex-wrap gap-1">
+                  {trace.tags.map((tag) => (
+                    <TagChip key={tag} tag={tag} />
+                  ))}
                 </span>
               </td>
               <td className="px-3 py-2 text-right font-mono tabular-nums">

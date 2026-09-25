@@ -11,6 +11,7 @@ export type {
   TraceListResponse,
   TraceDetail,
   ObservationDetail,
+  ScoreDetail,
   TraceId,
   ObservationId,
   CostUsd,
@@ -21,6 +22,7 @@ export type {
   ApiKeyCreated,
   IngestTrace,
   IngestObservation,
+  IngestScore,
   IngestBatch,
   IngestAccepted,
 } from "./types";

@@ -4,6 +4,7 @@ import { MissingApiConfigError } from "@/lib/api/config";
 import { ApiError } from "@/lib/api/errors";
 import { apiRequestRaw } from "@/lib/api/fetch";
 import { PROJECT_COOKIE } from "@/lib/auth/cookies";
+import { SCALAR_FILTERS, TAG_FILTER } from "@/lib/trace-filters";
 
 /**
  * Proxies the trace list to the backend as the signed-in user.
@@ -26,22 +27,19 @@ const DEFAULT_LIMIT = 50;
 const MAX_LIMIT = 200;
 
 /** Only these reach the backend — an unknown param is dropped, not forwarded. */
-const PASSTHROUGH_PARAMS = [
-  "cursor",
-  "name",
-  "user_id",
-  "session_id",
-  "from",
-  "to",
-] as const;
+const PASSTHROUGH_PARAMS = ["cursor", ...SCALAR_FILTERS] as const;
 
-function buildQuery(searchParams: URLSearchParams): Record<string, string> {
-  const query: Record<string, string> = {};
+function buildQuery(searchParams: URLSearchParams): Record<string, string | string[]> {
+  const query: Record<string, string | string[]> = {};
 
   for (const key of PASSTHROUGH_PARAMS) {
     const value = searchParams.get(key);
     if (value !== null && value !== "") query[key] = value;
   }
+  // Repeatable: the backend requires every tag given, so each is forwarded
+  // as its own parameter rather than joined.
+  const tags = searchParams.getAll(TAG_FILTER).filter((tag) => tag !== "");
+  if (tags.length > 0) query[TAG_FILTER] = tags;
 
   // Clamped, never absent: a trace table will hit tens of thousands of rows and
   // an unbounded list must not be requestable from the client.

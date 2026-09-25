@@ -4,13 +4,16 @@ const SNIPPET = `pip install llm-metrics
 
 # export LLM_METRICS_API_KEY=<an ingest key from Settings → API keys>
 # export LLM_METRICS_HOST=<this deployment's API URL>
-from llm_metrics import observe
+from llm_metrics import observe, score, update_trace
 
 @observe(name="hello")
-def handle(question: str) -> str:
-    ...  # your LLM call here
+def handle(user_id: str, question: str) -> str:
+    update_trace(user_id=user_id, tags=["hello"])  # who and what, for the filters
+    answer = ...  # your LLM call here; wrap_openai / wrap_anthropic trace it
+    score("has_answer", bool(answer), source="heuristic")
+    return answer
 
-handle("hi")`;
+handle("user-1", "hi")`;
 
 /**
  * Shown when a project has no traces at all.
@@ -51,7 +54,8 @@ export function NoMatchingTraces() {
     <div className="px-4 py-16 text-center">
       <h2 className="text-sm font-medium">No traces match these filters</h2>
       <p className="mt-1 text-sm text-muted-foreground">
-        Try widening the date range, or clearing the name filter.
+        Try widening the date range, or clearing a filter. Tags must all be
+        present on a trace for it to match.
       </p>
     </div>
   );

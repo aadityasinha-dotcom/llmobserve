@@ -15,10 +15,18 @@ export type TraceListResponse = components["schemas"]["TraceListResponse"];
 /** One trace with every observation under it, payloads included. */
 export type TraceDetail = components["schemas"]["TraceDetail"];
 export type ObservationDetail = components["schemas"]["ObservationDetail"];
+/**
+ * A judgement about a trace or one of its observations. `data_type` says
+ * whether the judgement is in `value` (numeric; booleans stored as 1/0) or in
+ * `value_text` (a label). `value` is a decimal string for the same reason cost
+ * is — see CostUsd.
+ */
+export type ScoreDetail = components["schemas"]["ScoreDetail"];
 
 /** Write-path models, sent by the SDK rather than rendered by the dashboard. */
 export type IngestTrace = components["schemas"]["IngestTrace"];
 export type IngestObservation = components["schemas"]["IngestObservation"];
+export type IngestScore = components["schemas"]["IngestScore"];
 export type IngestBatch = components["schemas"]["IngestBatch"];
 export type IngestAccepted = components["schemas"]["IngestAccepted"];
 

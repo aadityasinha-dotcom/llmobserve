@@ -1,12 +1,14 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 
+import { ScoreTable, TagChip } from "@/components/traces/scores";
 import { SpanTree, TraceIdBadge } from "@/components/traces/span-tree";
 import { ApiError, MissingApiConfigError, apiGet } from "@/lib/api";
 import { projectHeader, requireContext } from "@/lib/auth/session";
 import {
   formatCostUsd,
   formatDuration,
+  formatPercent,
   formatTimestamp,
   formatTokens,
 } from "@/lib/format";
@@ -54,6 +56,17 @@ export default async function TraceDetailPage({
     return <DetailFailure error={error} />;
   }
 
+  // Token detail is per observation and not part of the trace aggregates, so
+  // it is summed here from rows already in hand. Cached tokens are the subset
+  // of the prompt the provider billed at its discounted rate; reasoning tokens
+  // the subset of the completion the caller never saw.
+  const cachedTokens = trace.observations.reduce((sum, o) => sum + (o.cached_tokens ?? 0), 0);
+  const reasoningTokens = trace.observations.reduce(
+    (sum, o) => sum + (o.reasoning_tokens ?? 0),
+    0,
+  );
+  const observationNames = new Map(trace.observations.map((o) => [o.id, o.name]));
+
   return (
     <div className="min-h-screen bg-background text-foreground">
       <header className="border-b border-border px-4 py-3">
@@ -71,6 +84,13 @@ export default async function TraceDetailPage({
           <span className="font-mono text-xs text-muted-foreground">
             {formatTimestamp(trace.started_at)}
           </span>
+          {trace.tags.length > 0 && (
+            <span className="flex flex-wrap gap-1">
+              {trace.tags.map((tag) => (
+                <TagChip key={tag} tag={tag} />
+              ))}
+            </span>
+          )}
         </div>
 
         <dl className="mt-3 flex flex-wrap gap-x-8 gap-y-2">
@@ -91,10 +111,54 @@ export default async function TraceDetailPage({
             value={formatDuration(trace.duration_ms)}
             hint="Wall clock, from the trace's start to its end. Empty while the trace is still open."
           />
-          {trace.user_id && <Stat label="User" value={trace.user_id} mono />}
-          {trace.session_id && <Stat label="Session" value={trace.session_id} mono />}
+          {cachedTokens > 0 && (
+            <Stat
+              label="Cached"
+              value={`${formatTokens(cachedTokens)} (${formatPercent(cachedTokens, trace.prompt_tokens)})`}
+              hint="Prompt tokens the provider served from its cache, billed at the discounted rate. The share of the prompt is the number to watch."
+            />
+          )}
+          {reasoningTokens > 0 && (
+            <Stat
+              label="Reasoning"
+              value={formatTokens(reasoningTokens)}
+              hint="Completion tokens spent thinking, billed as output and never returned to the caller."
+            />
+          )}
+          {trace.user_id && (
+            <Stat
+              label="User"
+              value={trace.user_id}
+              href={`/traces?user_id=${encodeURIComponent(trace.user_id)}`}
+            />
+          )}
+          {trace.session_id && (
+            <Stat
+              label="Session"
+              value={trace.session_id}
+              href={`/traces?session_id=${encodeURIComponent(trace.session_id)}`}
+              hint="Every trace of this conversation or job."
+            />
+          )}
+          {trace.environment && (
+            <Stat
+              label="Environment"
+              value={trace.environment}
+              href={`/traces?environment=${encodeURIComponent(trace.environment)}`}
+            />
+          )}
+          {trace.release && (
+            <Stat
+              label="Release"
+              value={trace.release}
+              href={`/traces?release=${encodeURIComponent(trace.release)}`}
+              hint="The deploy this ran under. Compare releases to tell a model regression from a code change."
+            />
+          )}
         </dl>
       </header>
+
+      <ScoreTable scores={trace.scores} observationNames={observationNames} />
 
       {trace.observations.length === 0 ? (
         <div className="px-4 py-16 text-center">
@@ -105,7 +169,7 @@ export default async function TraceDetailPage({
           </p>
         </div>
       ) : (
-        <SpanTree observations={trace.observations} />
+        <SpanTree observations={trace.observations} scores={trace.scores} />
       )}
     </div>
   );
@@ -115,20 +179,27 @@ function Stat({
   label,
   value,
   hint,
-  mono,
+  href,
 }: {
   label: string;
   value: string;
   hint?: string;
-  mono?: boolean;
+  /** Attribution values link to the list filtered by them. */
+  href?: string;
 }) {
   return (
     <div title={hint}>
       <dt className="text-[11px] uppercase tracking-wider text-muted-foreground">
         {label}
       </dt>
-      <dd className={`text-xs tabular-nums ${mono ? "font-mono" : "font-mono"}`}>
-        {value}
+      <dd className="font-mono text-xs tabular-nums">
+        {href ? (
+          <Link href={href} className="hover:underline">
+            {value}
+          </Link>
+        ) : (
+          value
+        )}
       </dd>
     </div>
   );

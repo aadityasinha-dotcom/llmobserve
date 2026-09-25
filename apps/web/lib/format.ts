@@ -75,3 +75,30 @@ export function formatRelative(iso: string, now: number = Date.now()): string {
 export function shortId(id: string): string {
   return id.slice(0, 8);
 }
+
+/** "90%" — for the cached share of a prompt. Whole percentages only. */
+export function formatPercent(part: number, whole: number): string {
+  if (!whole || part <= 0) return "0%";
+  return `${Math.round((part / whole) * 100)}%`;
+}
+
+/**
+ * A score, as a human would say it.
+ *
+ * The API stores booleans as 1/0 in the numeric column and labels in
+ * `value_text`, discriminated by `data_type`. Numerics arrive as decimal
+ * strings with six places; trailing zeros are noise on a dashboard, so
+ * "0.875000" reads as "0.875" and "1.000000" as "1".
+ */
+export function formatScoreValue(score: {
+  data_type: string;
+  value?: string | null;
+  value_text?: string | null;
+}): string {
+  if (score.data_type === "categorical") return score.value_text ?? "—";
+  if (score.value == null) return "—";
+  const amount = Number(score.value);
+  if (!Number.isFinite(amount)) return score.value;
+  if (score.data_type === "boolean") return amount >= 1 ? "yes" : "no";
+  return String(amount);
+}

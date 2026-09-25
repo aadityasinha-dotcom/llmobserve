@@ -10,9 +10,10 @@ deploy targets are separate even though the repo is shared.
 
 ## Current phase
 
-Building the two views needed to see SDK traces end to end: a filterable trace
-list and a trace detail page with a nested span tree. Metrics charts, eval
-views, and prompt A/B comparison come later. Do not scaffold them yet.
+The two views needed to see SDK traces end to end exist: a filterable trace
+list and a trace detail page with a nested span tree, scores, and token
+detail. Metrics charts, eval views, and prompt A/B comparison come later. Do
+not scaffold them yet.
 
 ## Non-negotiable design rules
 
@@ -58,10 +59,17 @@ Backend base URL comes from `API_BASE_URL` (server-only). Auth is
 
 ## Data model (mirrors backend)
 
-- **Trace** — one user-facing request. id, name, user_id, metadata, timestamps
+- **Trace** — one user-facing request. id, name, user_id, session_id, tags,
+  environment, release, metadata, timestamps. The list filters on every one
+  of those except metadata; a tag filter is repeatable and conjunctive
 - **Observation** — one LLM/tool call. Nestable via `parent_id`. model, input,
-  output, prompt_tokens, completion_tokens, latency_ms, cost_usd
-- **Score** — attached to a trace or observation. name, value, source
+  output, prompt_tokens, completion_tokens, cached_tokens, reasoning_tokens
+  (subsets of the two totals), latency_ms, cost_usd, prompt_name,
+  prompt_version, metadata (provider facts on a shared vocabulary:
+  finish_reason, tool_calls, time_to_first_token_ms, rate_limit, ...)
+- **Score** — attached to a trace or observation. name, data_type
+  (numeric | boolean | categorical), value (decimal string; booleans as 1/0),
+  value_text, source, comment. Rendered from `TraceDetail.scores`
 
 Observations form a tree. The detail view renders that nesting; do not flatten it.
 
@@ -71,7 +79,8 @@ Observations form a tree. The detail view renders that nesting; do not flatten i
 app/
   (dash)/
     traces/page.tsx        # filterable, paginated list
-    traces/[id]/page.tsx   # nested span tree + payloads
+    traces/[id]/page.tsx   # scores, nested span tree + payloads + metadata
+lib/trace-filters.ts       # the one list of URL filters shared by page, form and proxy
 ```
 
 ## Design direction

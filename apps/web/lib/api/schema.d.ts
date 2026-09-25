@@ -51,6 +51,48 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/auth/google": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Complete a Google sign-in and receive a session token */
+        post: operations["sign_in_with_google_v1_auth_google_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/auth/logout": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Sign out everywhere
+         * @description Invalidate every session this user holds, on every device.
+         *
+         *     Stateless tokens cannot be deleted one at a time. Incrementing the user's
+         *     session_version makes every token carrying the old one fail verification,
+         *     so this is sign-out-everywhere by construction. Clearing the dashboard's
+         *     cookie alone would leave a copied token valid until it expired.
+         */
+        post: operations["logout_v1_auth_logout_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/ingest": {
         parameters: {
             query?: never;
@@ -61,7 +103,7 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Ingest a batch of traces and observations
+         * Ingest a batch of traces, observations and scores
          * @description Accept a batch, write it, and return.
          *
          *     202 rather than 201: what is promised is durability, not that any particular
@@ -70,6 +112,58 @@ export interface paths {
          */
         post: operations["ingest_v1_ingest_post"];
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/me": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The signed-in user and their projects */
+        get: operations["me_v1_me_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/projects/{project_id}/keys": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List a project's API keys */
+        get: operations["list_keys_v1_projects__project_id__keys_get"];
+        put?: never;
+        /** Create an API key. The raw key is returned once. */
+        post: operations["create_key_v1_projects__project_id__keys_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/projects/{project_id}/keys/{key_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Revoke an API key */
+        delete: operations["revoke_key_v1_projects__project_id__keys__key_id__delete"];
         options?: never;
         head?: never;
         patch?: never;
@@ -133,100 +227,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/v1/auth/google": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Complete a Google sign-in and receive a session token */
-        post: operations["sign_in_with_google_v1_auth_google_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/me": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** The signed-in user and their projects */
-        get: operations["me_v1_me_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/auth/logout": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Sign out everywhere
-         * @description Invalidate every session this user holds, on every device.
-         *
-         *     Stateless tokens cannot be deleted one at a time. Incrementing the user's
-         *     session_version makes every token carrying the old one fail verification,
-         *     so this is sign-out-everywhere by construction. Clearing the dashboard's
-         *     cookie alone would leave a copied token valid until it expired.
-         */
-        post: operations["logout_v1_auth_logout_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/projects/{project_id}/keys": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** List a project's API keys */
-        get: operations["list_keys_v1_projects__project_id__keys_get"];
-        put?: never;
-        /** Create an API key. The raw key is returned once. */
-        post: operations["create_key_v1_projects__project_id__keys_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/projects/{project_id}/keys/{key_id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post?: never;
-        /** Revoke an API key */
-        delete: operations["revoke_key_v1_projects__project_id__keys__key_id__delete"];
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -240,6 +240,13 @@ export interface components {
         };
         /** ApiKeyCreated */
         ApiKeyCreated: {
+            /** Api Key */
+            api_key: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
             /**
              * Id
              * Format: uuid
@@ -249,21 +256,19 @@ export interface components {
             key_prefix: string | null;
             /** Label */
             label: string | null;
-            /** Scopes */
-            scopes: string[];
-            /**
-             * Created At
-             * Format: date-time
-             */
-            created_at: string;
             /** Revoked At */
             revoked_at: string | null;
-            /** Api Key */
-            api_key: string;
+            /** Scopes */
+            scopes: string[];
         };
         /** ApiKeyOut */
         ApiKeyOut: {
             /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
              * Id
              * Format: uuid
              */
@@ -272,15 +277,10 @@ export interface components {
             key_prefix: string | null;
             /** Label */
             label: string | null;
-            /** Scopes */
-            scopes: string[];
-            /**
-             * Created At
-             * Format: date-time
-             */
-            created_at: string;
             /** Revoked At */
             revoked_at: string | null;
+            /** Scopes */
+            scopes: string[];
         };
         /**
          * GoogleSignInRequest
@@ -295,10 +295,10 @@ export interface components {
             code: string;
             /** Code Verifier */
             code_verifier: string;
-            /** Redirect Uri */
-            redirect_uri: string;
             /** Nonce */
             nonce: string;
+            /** Redirect Uri */
+            redirect_uri: string;
         };
         /** HTTPValidationError */
         HTTPValidationError: {
@@ -314,15 +314,25 @@ export interface components {
          *     client must not treat a lower number as an error.
          */
         IngestAccepted: {
-            /** Accepted Traces */
-            accepted_traces: number;
             /** Accepted Observations */
             accepted_observations: number;
+            /**
+             * Accepted Scores
+             * @default 0
+             */
+            accepted_scores: number;
+            /** Accepted Traces */
+            accepted_traces: number;
             /**
              * Rejected Observations
              * @default 0
              */
             rejected_observations: number;
+            /**
+             * Rejected Scores
+             * @default 0
+             */
+            rejected_scores: number;
         };
         /**
          * IngestBatch
@@ -331,7 +341,8 @@ export interface components {
          *     Flat (what the Python SDK sends), a single stream discriminated by `type`::
          *
          *         {"events": [{"id": ..., "type": "trace", ...},
-         *                     {"id": ..., "type": "generation", "trace_id": ..., ...}]}
+         *                     {"id": ..., "type": "generation", "trace_id": ..., ...},
+         *                     {"id": ..., "type": "score", "trace_id": ..., "name": ..., "value": ...}]}
          *
          *     Nested, where observations are carried inside their trace::
          *
@@ -349,93 +360,145 @@ export interface components {
          *     for trace rows, `observations` for the flat remainder.
          */
         IngestBatch: {
-            /** Traces */
-            traces?: components["schemas"]["IngestTrace"][];
             /** Observations */
             observations?: components["schemas"]["IngestObservation"][];
+            /** Scores */
+            scores?: components["schemas"]["IngestScore"][];
             /** Sdk Version */
             sdk_version?: string | null;
+            /** Traces */
+            traces?: components["schemas"]["IngestTrace"][];
         };
         /**
          * IngestObservation
          * @description One step inside a trace: an LLM generation, a span, or a discrete event.
          */
         IngestObservation: {
+            /** Cached Tokens */
+            cached_tokens?: number | null;
+            /** Completion Tokens */
+            completion_tokens?: number | null;
+            /** Ended At */
+            ended_at?: string | null;
             /**
              * Id
              * Format: uuid
              */
             id?: string;
-            /** Trace Id */
-            trace_id?: string | null;
+            /** Input */
+            input?: unknown | null;
+            /** Latency Ms */
+            latency_ms?: number | null;
+            /** Level */
+            level?: string | null;
+            /** Metadata */
+            metadata?: {
+                [key: string]: unknown;
+            };
+            /** Model */
+            model?: string | null;
+            /** Name */
+            name?: string | null;
+            /** Output */
+            output?: unknown | null;
             /** Parent Observation Id */
             parent_observation_id?: string | null;
+            /** Prompt Name */
+            prompt_name?: string | null;
+            /** Prompt Tokens */
+            prompt_tokens?: number | null;
+            /** Prompt Version */
+            prompt_version?: string | null;
+            /** Provider */
+            provider?: string | null;
+            /** Reasoning Tokens */
+            reasoning_tokens?: number | null;
+            /** Started At */
+            started_at?: string | null;
+            /** Status Message */
+            status_message?: string | null;
+            /** Trace Id */
+            trace_id?: string | null;
             /**
              * Type
              * @default span
              */
             type: string;
-            /** Name */
-            name?: string | null;
-            /** Model */
-            model?: string | null;
-            /** Provider */
-            provider?: string | null;
-            /** Input */
-            input?: unknown | null;
-            /** Output */
-            output?: unknown | null;
-            /** Prompt Tokens */
-            prompt_tokens?: number | null;
-            /** Completion Tokens */
-            completion_tokens?: number | null;
-            /** Latency Ms */
-            latency_ms?: number | null;
-            /** Level */
-            level?: string | null;
-            /** Status Message */
-            status_message?: string | null;
+        };
+        /**
+         * IngestScore
+         * @description A judgement about a trace or an observation.
+         *
+         *     `value` is a number, a boolean, or a short label; the router splits it into
+         *     the typed columns. A score with neither target id is unusable and the
+         *     router drops it - counted, not 4xxed, so one bad score cannot cost a batch.
+         */
+        IngestScore: {
+            /** Comment */
+            comment?: string | null;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id?: string;
             /** Metadata */
             metadata?: {
                 [key: string]: unknown;
             };
-            /** Started At */
-            started_at?: string | null;
-            /** Ended At */
-            ended_at?: string | null;
+            /** Name */
+            name: string;
+            /** Observation Id */
+            observation_id?: string | null;
+            /** Scored At */
+            scored_at?: string | null;
+            /**
+             * Source
+             * @default human
+             */
+            source: string;
+            /** Trace Id */
+            trace_id?: string | null;
+            /** Value */
+            value: boolean | number | string;
         };
         /**
          * IngestTrace
          * @description One logical run through the client application, with its observations nested.
          */
         IngestTrace: {
+            /** Ended At */
+            ended_at?: string | null;
+            /** Environment */
+            environment?: string | null;
             /**
              * Id
              * Format: uuid
              */
             id?: string;
-            /** Name */
-            name?: string | null;
-            /** User Id */
-            user_id?: string | null;
-            /** Session Id */
-            session_id?: string | null;
             /** Metadata */
             metadata?: {
                 [key: string]: unknown;
             };
-            /** Started At */
-            started_at?: string | null;
-            /** Ended At */
-            ended_at?: string | null;
+            /** Name */
+            name?: string | null;
             /** Observations */
             observations?: components["schemas"]["IngestObservation"][];
+            /** Release */
+            release?: string | null;
+            /** Session Id */
+            session_id?: string | null;
+            /** Started At */
+            started_at?: string | null;
+            /** Tags */
+            tags?: string[];
+            /** User Id */
+            user_id?: string | null;
         };
         /** MeOut */
         MeOut: {
-            user: components["schemas"]["UserOut"];
             /** Projects */
             projects: components["schemas"]["ProjectOut"][];
+            user: components["schemas"]["UserOut"];
         };
         /**
          * ObservationDetail
@@ -449,58 +512,66 @@ export interface components {
          *     a parent may still be in flight. Render an orphan at the root; do not drop it.
          */
         ObservationDetail: {
-            /**
-             * Id
-             * Format: uuid
-             */
-            id: string;
-            /**
-             * Trace Id
-             * Format: uuid
-             */
-            trace_id: string;
-            /** Parent Observation Id */
-            parent_observation_id?: string | null;
-            /** Type */
-            type: string;
-            /** Name */
-            name?: string | null;
-            /** Model */
-            model?: string | null;
-            /** Provider */
-            provider?: string | null;
-            /** Input */
-            input?: unknown | null;
-            /** Output */
-            output?: unknown | null;
-            /** Prompt Tokens */
-            prompt_tokens?: number | null;
+            /** Cached Tokens */
+            cached_tokens?: number | null;
             /** Completion Tokens */
             completion_tokens?: number | null;
-            /** Total Tokens */
-            total_tokens?: number | null;
             /**
              * Cost Usd
              * Format: decimal
              */
             cost_usd?: string | null;
+            /** Ended At */
+            ended_at?: string | null;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Input */
+            input?: unknown | null;
             /** Latency Ms */
             latency_ms?: number | null;
             /** Level */
             level?: string | null;
-            /** Status Message */
-            status_message?: string | null;
             /** Metadata */
             metadata: {
                 [key: string]: unknown;
             };
+            /** Model */
+            model?: string | null;
+            /** Name */
+            name?: string | null;
+            /** Output */
+            output?: unknown | null;
+            /** Parent Observation Id */
+            parent_observation_id?: string | null;
+            /** Prompt Name */
+            prompt_name?: string | null;
+            /** Prompt Tokens */
+            prompt_tokens?: number | null;
+            /** Prompt Version */
+            prompt_version?: string | null;
+            /** Provider */
+            provider?: string | null;
+            /** Reasoning Tokens */
+            reasoning_tokens?: number | null;
             /**
              * Started At
              * Format: date-time
              */
             started_at: string;
-            /** Ended At */
-            ended_at?: string | null;
+            /** Status Message */
+            status_message?: string | null;
+            /** Total Tokens */
+            total_tokens?: number | null;
+            /**
+             * Trace Id
+             * Format: uuid
+             */
+            trace_id: string;
+            /** Type */
+            type: string;
         };
         /** ProjectOut */
         ProjectOut: {
@@ -517,18 +588,66 @@ export interface components {
              */
             role: "owner" | "member";
         };
+        /**
+         * ScoreDetail
+         * @description One score, as stored.
+         *
+         *     `value` is the numeric form (booleans as 1/0) and `value_text` the label;
+         *     `data_type` says which one carries the judgement. Numeric values are
+         *     strings for the same reason cost is: a JSON float would round them.
+         */
+        ScoreDetail: {
+            /** Comment */
+            comment?: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Data Type */
+            data_type: string;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Metadata */
+            metadata: {
+                [key: string]: unknown;
+            };
+            /** Name */
+            name: string;
+            /** Observation Id */
+            observation_id?: string | null;
+            /**
+             * Scored At
+             * Format: date-time
+             */
+            scored_at: string;
+            /** Source */
+            source: string;
+            /** Trace Id */
+            trace_id?: string | null;
+            /**
+             * Value
+             * Format: decimal
+             */
+            value?: string | null;
+            /** Value Text */
+            value_text?: string | null;
+        };
         /** SessionOut */
         SessionOut: {
-            /** Session Token */
-            session_token: string;
+            /** Created */
+            created: boolean;
             /**
              * Expires At
              * Format: date-time
              */
             expires_at: string;
+            /** Session Token */
+            session_token: string;
             user: components["schemas"]["UserOut"];
-            /** Created */
-            created: boolean;
         };
         /**
          * TraceDetail
@@ -537,28 +656,71 @@ export interface components {
          *     Empty `observations` is a 200, never a 404. A trace with no observations is
          *     a legitimate thing to look at - it may be open, or a stub whose spans have
          *     not landed - and the trace row itself is what the id addresses.
+         *
+         *     `scores` carries every score that names this trace or one of its
+         *     observations, oldest first.
          */
         TraceDetail: {
-            /**
-             * Observation Count
-             * @default 0
-             */
-            observation_count: number;
-            /**
-             * Prompt Tokens
-             * @default 0
-             */
-            prompt_tokens: number;
             /**
              * Completion Tokens
              * @default 0
              */
             completion_tokens: number;
             /**
-             * Total Tokens
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Duration Ms */
+            duration_ms?: number | null;
+            /** Ended At */
+            ended_at?: string | null;
+            /** Environment */
+            environment?: string | null;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Metadata */
+            metadata: {
+                [key: string]: unknown;
+            };
+            /** Name */
+            name?: string | null;
+            /**
+             * Observation Count
              * @default 0
              */
-            total_tokens: number;
+            observation_count: number;
+            /** Observations */
+            observations: components["schemas"]["ObservationDetail"][];
+            /**
+             * Prompt Tokens
+             * @default 0
+             */
+            prompt_tokens: number;
+            /** Release */
+            release?: string | null;
+            /**
+             * Scores
+             * @default []
+             */
+            scores: components["schemas"]["ScoreDetail"][];
+            /** Sdk Version */
+            sdk_version?: string | null;
+            /** Session Id */
+            session_id?: string | null;
+            /**
+             * Started At
+             * Format: date-time
+             */
+            started_at: string;
+            /**
+             * Tags
+             * @default []
+             */
+            tags: string[];
             /**
              * Total Cost Usd
              * Format: decimal
@@ -572,38 +734,12 @@ export interface components {
              */
             total_latency_ms: number;
             /**
-             * Id
-             * Format: uuid
+             * Total Tokens
+             * @default 0
              */
-            id: string;
-            /** Name */
-            name?: string | null;
+            total_tokens: number;
             /** User Id */
             user_id?: string | null;
-            /** Session Id */
-            session_id?: string | null;
-            /** Metadata */
-            metadata: {
-                [key: string]: unknown;
-            };
-            /**
-             * Started At
-             * Format: date-time
-             */
-            started_at: string;
-            /** Ended At */
-            ended_at?: string | null;
-            /**
-             * Created At
-             * Format: date-time
-             */
-            created_at: string;
-            /** Sdk Version */
-            sdk_version?: string | null;
-            /** Duration Ms */
-            duration_ms?: number | null;
-            /** Observations */
-            observations: components["schemas"]["ObservationDetail"][];
         };
         /**
          * TraceListItem
@@ -611,6 +747,33 @@ export interface components {
          */
         TraceListItem: {
             /**
+             * Completion Tokens
+             * @default 0
+             */
+            completion_tokens: number;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Duration Ms */
+            duration_ms?: number | null;
+            /** Ended At */
+            ended_at?: string | null;
+            /** Environment */
+            environment?: string | null;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Metadata */
+            metadata: {
+                [key: string]: unknown;
+            };
+            /** Name */
+            name?: string | null;
+            /**
              * Observation Count
              * @default 0
              */
@@ -620,16 +783,22 @@ export interface components {
              * @default 0
              */
             prompt_tokens: number;
+            /** Release */
+            release?: string | null;
+            /** Sdk Version */
+            sdk_version?: string | null;
+            /** Session Id */
+            session_id?: string | null;
             /**
-             * Completion Tokens
-             * @default 0
+             * Started At
+             * Format: date-time
              */
-            completion_tokens: number;
+            started_at: string;
             /**
-             * Total Tokens
-             * @default 0
+             * Tags
+             * @default []
              */
-            total_tokens: number;
+            tags: string[];
             /**
              * Total Cost Usd
              * Format: decimal
@@ -643,36 +812,12 @@ export interface components {
              */
             total_latency_ms: number;
             /**
-             * Id
-             * Format: uuid
+             * Total Tokens
+             * @default 0
              */
-            id: string;
-            /** Name */
-            name?: string | null;
+            total_tokens: number;
             /** User Id */
             user_id?: string | null;
-            /** Session Id */
-            session_id?: string | null;
-            /** Metadata */
-            metadata: {
-                [key: string]: unknown;
-            };
-            /**
-             * Started At
-             * Format: date-time
-             */
-            started_at: string;
-            /** Ended At */
-            ended_at?: string | null;
-            /**
-             * Created At
-             * Format: date-time
-             */
-            created_at: string;
-            /** Sdk Version */
-            sdk_version?: string | null;
-            /** Duration Ms */
-            duration_ms?: number | null;
         };
         /**
          * TraceListResponse
@@ -686,40 +831,40 @@ export interface components {
         TraceListResponse: {
             /** Data */
             data: components["schemas"]["TraceListItem"][];
-            /** Next Cursor */
-            next_cursor?: string | null;
             /**
              * Has More
              * @default false
              */
             has_more: boolean;
+            /** Next Cursor */
+            next_cursor?: string | null;
         };
         /** UserOut */
         UserOut: {
+            /** Avatar Url */
+            avatar_url?: string | null;
+            /** Email */
+            email: string;
             /**
              * Id
              * Format: uuid
              */
             id: string;
-            /** Email */
-            email: string;
             /** Name */
             name?: string | null;
-            /** Avatar Url */
-            avatar_url?: string | null;
         };
         /** ValidationError */
         ValidationError: {
+            /** Context */
+            ctx?: Record<string, never>;
+            /** Input */
+            input?: unknown;
             /** Location */
             loc: (string | number)[];
             /** Message */
             msg: string;
             /** Error Type */
             type: string;
-            /** Input */
-            input?: unknown;
-            /** Context */
-            ctx?: Record<string, never>;
         };
     };
     responses: never;
@@ -771,6 +916,85 @@ export interface operations {
                         [key: string]: string;
                     };
                 };
+            };
+        };
+    };
+    sign_in_with_google_v1_auth_google_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GoogleSignInRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionOut"];
+                };
+            };
+            /** @description redirect_uri is not an allowed sign-in destination */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Google rejected the code, or the ID token failed verification */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Unverified email, or sign-up is restricted */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Sign-in is not configured on this API */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    logout_v1_auth_logout_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };
@@ -831,6 +1055,129 @@ export interface operations {
             };
         };
     };
+    me_v1_me_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MeOut"];
+                };
+            };
+        };
+    };
+    list_keys_v1_projects__project_id__keys_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiKeyOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_key_v1_projects__project_id__keys_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ApiKeyCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiKeyCreated"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    revoke_key_v1_projects__project_id__keys__key_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: string;
+                key_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description No such active key in a project you belong to */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     list_traces_v1_traces_get: {
         parameters: {
             query?: {
@@ -843,6 +1190,12 @@ export interface operations {
                 user_id?: string | null;
                 /** @description Exact match on the client's session id. */
                 session_id?: string | null;
+                /** @description Exact match on the deployment environment. */
+                environment?: string | null;
+                /** @description Exact match on the release. */
+                release?: string | null;
+                /** @description Only traces carrying every one of these tags. Repeatable. */
+                tag?: string[] | null;
                 /** @description Only traces with started_at >= this (inclusive). */
                 from?: string | null;
                 /** @description Only traces with started_at < this (exclusive). */
@@ -934,208 +1287,6 @@ export interface operations {
                 content?: never;
             };
             /** @description No such trace in this project */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    sign_in_with_google_v1_auth_google_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["GoogleSignInRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["SessionOut"];
-                };
-            };
-            /** @description redirect_uri is not an allowed sign-in destination */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Google rejected the code, or the ID token failed verification */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Unverified email, or sign-up is restricted */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-            /** @description Sign-in is not configured on this API */
-            503: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-        };
-    };
-    me_v1_me_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["MeOut"];
-                };
-            };
-        };
-    };
-    logout_v1_auth_logout_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            204: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-        };
-    };
-    list_keys_v1_projects__project_id__keys_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                project_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiKeyOut"][];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    create_key_v1_projects__project_id__keys_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                project_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["ApiKeyCreate"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiKeyCreated"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    revoke_key_v1_projects__project_id__keys__key_id__delete: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                project_id: string;
-                key_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            204: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description No such active key in a project you belong to */
             404: {
                 headers: {
                     [name: string]: unknown;

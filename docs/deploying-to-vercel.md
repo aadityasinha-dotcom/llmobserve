@@ -99,7 +99,7 @@ serving cross-tenant data.
 Deploy, then:
 
 ```bash
-API=https://llm-observe-api.vercel.app      # your production domain
+API=https://api-eta-eight-10.vercel.app      # your production domain
 curl -s $API/healthz        # {"status":"ok","environment":"production"}
 curl -s $API/readyz         # {"status":"ready"}  <- proves RLS is enforced
 ```
@@ -124,7 +124,7 @@ Import the **same repo** a second time:
 
 | Name | Value |
 |---|---|
-| `API_BASE_URL` | `https://llm-observe-api.vercel.app`, no trailing slash |
+| `API_BASE_URL` | `https://api-eta-eight-10.vercel.app`, no trailing slash |
 | `GOOGLE_CLIENT_ID` | the Google OAuth client ID — see `docs/google-sign-in.md` |
 
 Neither is `NEXT_PUBLIC_`, so neither reaches the browser. The dashboard calls
@@ -147,7 +147,7 @@ off for the API project too, as before.
 ## 3. Point the SDK at it
 
 ```bash
-export LLM_METRICS_HOST=https://llm-observe-api.vercel.app
+export LLM_METRICS_HOST=https://api-eta-eight-10.vercel.app
 export LLM_METRICS_API_KEY=llmo_sk_...
 export LLM_METRICS_DEBUG=1
 ~/git-repo/llmobserve-python/.venv/bin/python examples/hello_trace.py
@@ -164,7 +164,7 @@ Protection puts its own login page in front of per-deployment URLs
 (`llm-observe-api-abc123-you.vercel.app`). A request there gets Vercel's 401,
 not the API's. The SDK treats that as a bad key and drops the batch, and the
 dashboard shows "API key rejected". The project's production domain
-(`llm-observe-api.vercel.app`) is not protected under the default setting. If
+(`api-eta-eight-10.vercel.app`) is not protected under the default setting. If
 calls to it still return Vercel's login page, check **Settings → Deployment
 Protection** on the API project.
 

@@ -88,6 +88,11 @@ class TraceListItem(TraceAggregates):
     name: str | None = None
     user_id: str | None = None
     session_id: str | None = None
+    # Attribution. `tags` is NOT NULL in the database (empty array by default),
+    # so it is always present here too.
+    tags: list[str] = []
+    environment: str | None = None
+    release: str | None = None
     # Required, not defaulted: the column is NOT NULL and every response carries
     # it. A default here would publish the field as optional and make the
     # dashboard null-check something that is never absent.
@@ -149,9 +154,16 @@ class ObservationDetail(BaseModel):
 
     prompt_tokens: int | None = None
     completion_tokens: int | None = None
+    # Subsets of the two above: the cache-hit part of the prompt, and the
+    # hidden reasoning part of the completion.
+    cached_tokens: int | None = None
+    reasoning_tokens: int | None = None
     total_tokens: int | None = None
     cost_usd: OptionalCostUsd = None
     latency_ms: int | None = None
+
+    prompt_name: str | None = None
+    prompt_version: str | None = None
 
     level: str | None = None
     status_message: str | None = None
@@ -161,12 +173,44 @@ class ObservationDetail(BaseModel):
     ended_at: datetime | None = None
 
 
+class ScoreDetail(BaseModel):
+    """One score, as stored.
+
+    `value` is the numeric form (booleans as 1/0) and `value_text` the label;
+    `data_type` says which one carries the judgement. Numeric values are
+    strings for the same reason cost is: a JSON float would round them.
+    """
+
+    model_config = _BASE_CONFIG
+
+    id: UUID
+    trace_id: UUID | None = None
+    observation_id: UUID | None = None
+    name: str
+    data_type: str
+    value: Annotated[
+        Decimal | None,
+        PlainSerializer(_decimal_to_str, return_type=str | None),
+        WithJsonSchema({"type": ["string", "null"], "format": "decimal"}),
+    ] = None
+    value_text: str | None = None
+    comment: str | None = None
+    source: str
+    metadata: dict[str, Any]
+    scored_at: datetime
+    created_at: datetime
+
+
 class TraceDetail(TraceListItem):
     """GET /v1/traces/{trace_id}: one trace and every observation under it.
 
     Empty `observations` is a 200, never a 404. A trace with no observations is
     a legitimate thing to look at - it may be open, or a stub whose spans have
     not landed - and the trace row itself is what the id addresses.
+
+    `scores` carries every score that names this trace or one of its
+    observations, oldest first.
     """
 
     observations: list[ObservationDetail]
+    scores: list[ScoreDetail] = []

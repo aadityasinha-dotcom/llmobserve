@@ -177,3 +177,75 @@ def test_pricebook_version_is_a_date() -> None:
     year, month, day = PRICEBOOK_VERSION.split("-")
     assert len(year) == 4 and len(month) == 2 and len(day) == 2
     assert year.isdigit() and month.isdigit() and day.isdigit()
+
+
+@pytest.mark.parametrize(
+    ("model", "expected_input", "expected_output"),
+    [
+        ("claude-opus-5-5", Decimal("4"), Decimal("20")),
+        ("claude-fable-5-1", Decimal("10"), Decimal("50")),
+        ("claude-mythos-5-1", Decimal("10"), Decimal("50")),
+    ],
+)
+def test_point_releases_are_priced_as_themselves(
+    model: str, expected_input: Decimal, expected_output: Decimal
+) -> None:
+    """A point release must not inherit its predecessor's price by prefix.
+
+    `claude-opus-5-5` is a dash-bounded extension of `claude-opus-5`, so without
+    its own entry the longest-prefix rule bills it at Opus 5's $5/$25 instead of
+    its own $4/$20 - an overcharge that cost freezing then makes permanent.
+    """
+    price = lookup_price(model)
+    assert price is not None
+    assert (price.input_usd_per_mtok, price.output_usd_per_mtok) == (
+        expected_input,
+        expected_output,
+    )
+
+
+# --------------------------------------------------------------------------
+# Prompt caching
+# --------------------------------------------------------------------------
+
+
+def test_cached_tokens_are_billed_at_the_cached_rate() -> None:
+    # gpt-4o: $2.50 in, $1.25 cached, $10 out. 100 fresh + 900 cached + 100 out.
+    assert compute_cost_usd("gpt-4o", 1000, 100, cached_tokens=900) == Decimal("0.00237500")
+
+
+def test_no_cached_tokens_means_the_old_arithmetic() -> None:
+    assert compute_cost_usd("gpt-4o", 1000, 100) == Decimal("0.00350000")
+    assert compute_cost_usd("gpt-4o", 1000, 100, cached_tokens=0) == Decimal("0.00350000")
+
+
+def test_cached_tokens_are_clamped_to_the_prompt() -> None:
+    """A client that gets the two the wrong way round cannot go negative."""
+    assert compute_cost_usd("gpt-4o", 100, 0, cached_tokens=900) == compute_cost_usd(
+        "gpt-4o", 100, 0, cached_tokens=100
+    )
+
+
+def test_anthropic_cache_reads_are_a_tenth_of_input() -> None:
+    price = lookup_price("claude-sonnet-5")
+    assert price is not None
+    assert price.cached_input_usd_per_mtok == price.input_usd_per_mtok * Decimal("0.1")
+    # 1000 cached @ $0.20 per million = $0.0002; nothing else.
+    assert compute_cost_usd("claude-sonnet-5", 1000, 0, cached_tokens=1000) == Decimal("0.00020000")
+
+
+def test_a_model_without_a_cached_rate_bills_cached_tokens_at_input() -> None:
+    price = lookup_price("gpt-4o-2024-05-13")
+    assert price is not None
+    assert price.cached_input_usd_per_mtok is None
+    assert compute_cost_usd("gpt-4o-2024-05-13", 1000, 0, cached_tokens=1000) == compute_cost_usd(
+        "gpt-4o-2024-05-13", 1000, 0
+    )
+
+
+def test_every_cached_rate_is_below_its_input_rate() -> None:
+    for name in known_models():
+        price = lookup_price(name)
+        assert price is not None
+        if price.cached_input_usd_per_mtok is not None:
+            assert Decimal(0) < price.cached_input_usd_per_mtok < price.input_usd_per_mtok, name

@@ -19,12 +19,21 @@ Prices are USD per 1,000,000 tokens, held as `Decimal` and never as `float` -
 binary floating point cannot represent 0.15 exactly, and these values are
 multiplied by token counts in the millions.
 
-Deliberately NOT modelled here: prompt-caching read/write multipliers, batch
-discounts, and data-residency multipliers. The ingest payload carries a single
-prompt/completion token pair with no way to tell cached from uncached tokens, so
-applying those rates would be guesswork. Traffic using them is under-reported
-rather than mis-reported. Widening the SDK contract to carry cache token counts
-is the fix, and it belongs in the SDK repo first.
+Prompt caching
+--------------
+The SDK sends `cached_tokens` as the subset of `prompt_tokens` that the provider
+served from its prompt cache, normalised so that this holds for every provider
+(Anthropic reports it the other way round; the SDK fixes that up). Providers
+bill that subset at a fraction of the fresh input rate, and the fraction is
+where the two differ: Anthropic charges 10% across the board, OpenAI a
+per-model rate. Where a cached rate is listed the discount is applied; where it
+is not, cached tokens are billed at the full input rate, which is what every
+row before this column existed was billed at. Reasoning tokens need no rate:
+both providers already count them inside completion_tokens.
+
+Deliberately NOT modelled here: cache *write* premiums (the SDK carries the
+count only in metadata), batch discounts, and data-residency multipliers.
+Traffic using them is mis-reported in the conservative direction.
 """
 
 import logging
@@ -36,7 +45,7 @@ logger = logging.getLogger(__name__)
 # Bump when any price below changes. Stored nowhere yet - see the note in
 # compute_cost_usd about what it would take to attribute a stored cost to the
 # exact pricebook that produced it.
-PRICEBOOK_VERSION = "2026-08-19"
+PRICEBOOK_VERSION = "2026-09-26"
 
 # cost_usd is NUMERIC(18, 8); quantise to match so the value written is exactly
 # the value computed rather than whatever Postgres rounds it to.
@@ -46,14 +55,39 @@ _PER_MTOK = Decimal(1_000_000)
 
 @dataclass(frozen=True)
 class ModelPrice:
-    """Base (uncached, non-batch) token prices in USD per million tokens."""
+    """Base (non-batch) token prices in USD per million tokens.
+
+    `cached_input_usd_per_mtok` is the rate for the prompt-cache-hit subset of
+    the input. None means no rate is known and cached tokens bill at the full
+    input rate - never a guess, per the module docstring.
+    """
 
     input_usd_per_mtok: Decimal
     output_usd_per_mtok: Decimal
+    cached_input_usd_per_mtok: Decimal | None = None
 
 
-def _p(input_price: str, output_price: str) -> ModelPrice:
-    return ModelPrice(Decimal(input_price), Decimal(output_price))
+# Anthropic prices every cache read at a tenth of the input rate, for every
+# model, and has since prompt caching launched. Applied to the claude-* entries
+# below so a new point release inherits it automatically.
+_ANTHROPIC_CACHE_READ_FACTOR = Decimal("0.1")
+
+
+def _p(input_price: str, output_price: str, cached_price: str | None = None) -> ModelPrice:
+    return ModelPrice(
+        Decimal(input_price),
+        Decimal(output_price),
+        Decimal(cached_price) if cached_price is not None else None,
+    )
+
+
+def _a(input_price: str, output_price: str) -> ModelPrice:
+    """An Anthropic entry: cache reads at 10% of input."""
+    return ModelPrice(
+        Decimal(input_price),
+        Decimal(output_price),
+        Decimal(input_price) * _ANTHROPIC_CACHE_READ_FACTOR,
+    )
 
 
 # Keys are normalised model ids (see _normalise). Version-dated ids such as
@@ -62,26 +96,38 @@ def _p(input_price: str, output_price: str) -> ModelPrice:
 # is priced differently from its family, which is why gpt-4o-2024-05-13 is
 # listed explicitly.
 #
-# Sources, both retrieved 2026-08-19:
+# Cached-input rates: OpenAI lists one per model and they are entered where the
+# pricing page states them; models without a stated rate (the newest gpt-5.x
+# tiers, the pro tiers, the 2024-05-13 snapshot) carry None and bill cached
+# tokens at the input rate until someone confirms the figure.
+#
+# Sources, both retrieved 2026-08-19 (Anthropic point releases re-checked
+# 2026-09-25, cached-input rates entered 2026-09-26):
 #   https://platform.claude.com/docs/en/about-claude/pricing
 #   https://developers.openai.com/api/docs/pricing
 _PRICEBOOK: dict[str, ModelPrice] = {
     # --- Anthropic ---------------------------------------------------------
-    "claude-fable-5": _p("10", "50"),
-    "claude-mythos-5": _p("10", "50"),
-    "claude-opus-5": _p("5", "25"),
-    "claude-opus-4-8": _p("5", "25"),
-    "claude-opus-4-7": _p("5", "25"),
-    "claude-opus-4-6": _p("5", "25"),
-    "claude-opus-4-5": _p("5", "25"),
-    "claude-opus-4-1": _p("15", "75"),
-    "claude-opus-4": _p("15", "75"),
-    "claude-sonnet-5": _p("2", "10"),
-    "claude-sonnet-4-6": _p("3", "15"),
-    "claude-sonnet-4-5": _p("3", "15"),
-    "claude-sonnet-4": _p("3", "15"),
-    "claude-haiku-4-5": _p("1", "5"),
-    "claude-3-5-haiku": _p("0.80", "4"),
+    # Point releases get their own entries even when the price matches the
+    # family stem. Without one, `claude-opus-5-5` resolves to `claude-opus-5` by
+    # prefix and is billed at Opus 5's rate - 25% high, and frozen that way.
+    "claude-fable-5-1": _a("10", "50"),
+    "claude-fable-5": _a("10", "50"),
+    "claude-mythos-5-1": _a("10", "50"),
+    "claude-mythos-5": _a("10", "50"),
+    "claude-opus-5-5": _a("4", "20"),
+    "claude-opus-5": _a("5", "25"),
+    "claude-opus-4-8": _a("5", "25"),
+    "claude-opus-4-7": _a("5", "25"),
+    "claude-opus-4-6": _a("5", "25"),
+    "claude-opus-4-5": _a("5", "25"),
+    "claude-opus-4-1": _a("15", "75"),
+    "claude-opus-4": _a("15", "75"),
+    "claude-sonnet-5": _a("2", "10"),
+    "claude-sonnet-4-6": _a("3", "15"),
+    "claude-sonnet-4-5": _a("3", "15"),
+    "claude-sonnet-4": _a("3", "15"),
+    "claude-haiku-4-5": _a("1", "5"),
+    "claude-3-5-haiku": _a("0.80", "4"),
     # --- OpenAI ------------------------------------------------------------
     "gpt-5.6-sol": _p("5", "30"),
     "gpt-5.6-terra": _p("2", "12"),
@@ -94,25 +140,25 @@ _PRICEBOOK: dict[str, ModelPrice] = {
     "gpt-5.4": _p("2.50", "15"),
     "gpt-5.2-pro": _p("21", "168"),
     "gpt-5.2": _p("1.75", "14"),
-    "gpt-5.1": _p("1.25", "10"),
+    "gpt-5.1": _p("1.25", "10", "0.125"),
     "gpt-5-pro": _p("15", "120"),
-    "gpt-5-mini": _p("0.25", "2"),
-    "gpt-5-nano": _p("0.05", "0.40"),
-    "gpt-5": _p("1.25", "10"),
-    "gpt-4.1-mini": _p("0.40", "1.60"),
-    "gpt-4.1-nano": _p("0.10", "0.40"),
-    "gpt-4.1": _p("2", "8"),
+    "gpt-5-mini": _p("0.25", "2", "0.025"),
+    "gpt-5-nano": _p("0.05", "0.40", "0.005"),
+    "gpt-5": _p("1.25", "10", "0.125"),
+    "gpt-4.1-mini": _p("0.40", "1.60", "0.10"),
+    "gpt-4.1-nano": _p("0.10", "0.40", "0.025"),
+    "gpt-4.1": _p("2", "8", "0.50"),
     # The 2024-05-13 snapshot is priced above the family it belongs to; the
     # exact-match pass below is what keeps it from being rounded down to gpt-4o.
     "gpt-4o-2024-05-13": _p("5", "15"),
-    "gpt-4o-mini": _p("0.15", "0.60"),
-    "gpt-4o": _p("2.50", "10"),
+    "gpt-4o-mini": _p("0.15", "0.60", "0.075"),
+    "gpt-4o": _p("2.50", "10", "1.25"),
     "o1-pro": _p("150", "600"),
-    "o1": _p("15", "60"),
+    "o1": _p("15", "60", "7.50"),
     "o3-pro": _p("20", "80"),
-    "o3-mini": _p("1.10", "4.40"),
-    "o3": _p("2", "8"),
-    "o4-mini": _p("1.10", "4.40"),
+    "o3-mini": _p("1.10", "4.40", "0.55"),
+    "o3": _p("2", "8", "0.50"),
+    "o4-mini": _p("1.10", "4.40", "0.275"),
 }
 
 # Provider-qualified ids arrive from gateways (OpenRouter, LiteLLM, Bedrock) and
@@ -207,6 +253,7 @@ def compute_cost_usd(
     model: str | None,
     prompt_tokens: int | None,
     completion_tokens: int | None,
+    cached_tokens: int | None = None,
 ) -> Decimal | None:
     """Cost of one observation in USD, or None when it cannot be established.
 
@@ -218,6 +265,11 @@ def compute_cost_usd(
     A missing count on one side is treated as zero once the other side is
     present: a streamed response often reports prompt tokens before completion
     tokens exist, and charging for the half that is known beats discarding both.
+
+    `cached_tokens` is the cache-hit subset of `prompt_tokens`. It is clamped to
+    the prompt total, so a client that gets the two the wrong way round cannot
+    produce a negative fresh-token count. With no cached rate in the pricebook
+    the subset bills at the full input rate.
 
     The returned value is what gets stored. If you later need to attribute a cost
     back to the exact prices that produced it, that requires a new column
@@ -232,8 +284,18 @@ def compute_cost_usd(
 
     prompt = prompt_tokens or 0
     completion = completion_tokens or 0
+    cached = min(cached_tokens or 0, prompt)
+    cached_rate = (
+        price.cached_input_usd_per_mtok
+        if price.cached_input_usd_per_mtok is not None
+        else price.input_usd_per_mtok
+    )
 
-    total = (prompt * price.input_usd_per_mtok + completion * price.output_usd_per_mtok) / _PER_MTOK
+    total = (
+        (prompt - cached) * price.input_usd_per_mtok
+        + cached * cached_rate
+        + completion * price.output_usd_per_mtok
+    ) / _PER_MTOK
 
     return total.quantize(_COST_EXPONENT, rounding=ROUND_HALF_UP)
 

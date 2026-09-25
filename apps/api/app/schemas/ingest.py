@@ -37,6 +37,17 @@ MAX_OBSERVATIONS_PER_TRACE = 2000
 # Parsing stops here; app.config.ingest_max_observations_per_batch is the
 # operator-tunable limit the router applies on top, and answers 413.
 MAX_OBSERVATIONS_PER_BATCH = 10_000
+MAX_SCORES_PER_BATCH = 10_000
+
+# Attribution ceilings. Trimmed rather than rejected: a client that tags a
+# trace with sixty labels has a bug, but losing its trace over it is worse.
+MAX_TAGS_PER_TRACE = 32
+MAX_TAG_CHARS = 64
+MAX_ENVIRONMENT_CHARS = 64
+MAX_RELEASE_CHARS = 128
+MAX_PROMPT_NAME_CHARS = 255
+MAX_PROMPT_VERSION_CHARS = 64
+MAX_SCORE_LABEL_CHARS = 255
 
 _BASE_CONFIG = ConfigDict(
     extra="ignore",
@@ -77,6 +88,46 @@ _NumericCount = Annotated[
     BeforeValidator(_coerce_count),
     WithJsonSchema({"type": ["number", "null"], "minimum": 0}),
 ]
+
+
+def _clip(value: Any, limit: int) -> Any:
+    """Truncate a string to the column width instead of failing the batch."""
+    if isinstance(value, str) and len(value) > limit:
+        return value[:limit]
+    return value
+
+
+def _coerce_tags(value: Any) -> Any:
+    """Reduce whatever arrived to a bounded list of distinct, non-empty strings.
+
+    A bare string is one tag; anything that is not a string or a list of them
+    is dropped rather than rejected. Order is preserved, duplicates are not.
+    """
+    if value is None:
+        return []
+    if isinstance(value, str):
+        value = [value]
+    if not isinstance(value, (list, tuple, set, frozenset)):
+        return []
+    seen: list[str] = []
+    for item in value:
+        if not isinstance(item, str):
+            continue
+        tag = item.strip()[:MAX_TAG_CHARS]
+        if tag and tag not in seen:
+            seen.append(tag)
+        if len(seen) >= MAX_TAGS_PER_TRACE:
+            break
+    return seen
+
+
+def _coerce_version(value: Any) -> Any:
+    """Prompt versions arrive as ints from some clients; the column is text."""
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return str(value)
+    return _clip(value, MAX_PROMPT_VERSION_CHARS)
 
 
 def _as_utc(value: datetime | None) -> datetime | None:
@@ -143,7 +194,30 @@ class IngestObservation(BaseModel):
         ),
     )
 
+    # Subsets of the two totals above. Cached tokens are priced at a fraction of
+    # fresh ones, which is the whole reason to carry the split. The SDK
+    # normalises prompt_tokens to *include* the cached part for every provider.
+    cached_tokens: _NumericCount = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            "cached_tokens",
+            "cache_read_input_tokens",
+            "gen_ai.usage.cache_read.input_tokens",
+        ),
+    )
+    reasoning_tokens: _NumericCount = Field(
+        default=None,
+        validation_alias=AliasChoices("reasoning_tokens", "gen_ai.usage.reasoning_tokens"),
+    )
+
     latency_ms: _NumericCount = Field(default=None)
+
+    # Which prompt template produced this call. Free text now; the prompts
+    # table is a later phase and will key off the same pair.
+    prompt_name: Annotated[
+        str | None, BeforeValidator(lambda v: _clip(v, MAX_PROMPT_NAME_CHARS))
+    ] = Field(default=None)
+    prompt_version: Annotated[str | None, BeforeValidator(_coerce_version)] = Field(default=None)
 
     # The SDK sends `status`, carrying the OpenTelemetry span status codes
     # ("ok" / "error"). There is no separate status column, and dropping it
@@ -196,6 +270,16 @@ class IngestTrace(BaseModel):
         default=None, validation_alias=AliasChoices("session_id", "sessionId")
     )
 
+    # Attribution. Bounded and trimmed rather than validated strictly - see
+    # the ceilings at the top of the module.
+    tags: Annotated[list[str], BeforeValidator(_coerce_tags)] = Field(default_factory=list)
+    environment: Annotated[
+        str | None, BeforeValidator(lambda v: _clip(v, MAX_ENVIRONMENT_CHARS))
+    ] = Field(default=None)
+    release: Annotated[str | None, BeforeValidator(lambda v: _clip(v, MAX_RELEASE_CHARS))] = Field(
+        default=None
+    )
+
     metadata: dict[str, Any] = Field(default_factory=dict)
 
     started_at: datetime | None = Field(
@@ -241,6 +325,55 @@ class IngestTrace(BaseModel):
 
 # Event `type` marking a trace rather than an observation, in the flat envelope.
 TRACE_EVENT_TYPE = "trace"
+# Event `type` marking a score. Scores are neither traces nor observations: they
+# point at one of those and carry a judgement about it.
+SCORE_EVENT_TYPE = "score"
+
+
+class IngestScore(BaseModel):
+    """A judgement about a trace or an observation.
+
+    `value` is a number, a boolean, or a short label; the router splits it into
+    the typed columns. A score with neither target id is unusable and the
+    router drops it - counted, not 4xxed, so one bad score cannot cost a batch.
+    """
+
+    model_config = _BASE_CONFIG
+
+    id: UUID = Field(default_factory=uuid4)
+    trace_id: UUID | None = None
+    observation_id: UUID | None = None
+
+    name: str = Field(min_length=1, max_length=255)
+    # bool before int|float: bool is an int subclass and would otherwise be
+    # coerced to 1/0 before the router can tell it was a boolean.
+    value: bool | int | float | str
+
+    comment: str | None = None
+    # human | llm_judge | heuristic. Free text on purpose (rule 5).
+    source: str = Field(default="human", max_length=32)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+    scored_at: datetime | None = Field(
+        default=None,
+        validation_alias=AliasChoices("scored_at", "timestamp", "created_at"),
+    )
+
+    @field_validator("scored_at")
+    @classmethod
+    def _normalise_timestamp(cls, value: datetime | None) -> datetime | None:
+        return _as_utc(value)
+
+    @field_validator("value")
+    @classmethod
+    def _bound_label(cls, value: bool | int | float | str) -> bool | int | float | str:
+        if isinstance(value, str):
+            return value[:MAX_SCORE_LABEL_CHARS]
+        return value
+
+    @property
+    def has_target(self) -> bool:
+        return self.trace_id is not None or self.observation_id is not None
 
 
 class IngestBatch(BaseModel):
@@ -249,7 +382,8 @@ class IngestBatch(BaseModel):
     Flat (what the Python SDK sends), a single stream discriminated by `type`::
 
         {"events": [{"id": ..., "type": "trace", ...},
-                    {"id": ..., "type": "generation", "trace_id": ..., ...}]}
+                    {"id": ..., "type": "generation", "trace_id": ..., ...},
+                    {"id": ..., "type": "score", "trace_id": ..., "name": ..., "value": ...}]}
 
     Nested, where observations are carried inside their trace::
 
@@ -280,6 +414,11 @@ class IngestBatch(BaseModel):
         list[IngestObservation], Field(max_length=MAX_OBSERVATIONS_PER_BATCH)
     ] = Field(default_factory=list)
 
+    # Judgements about traces and observations, from `events` or sent directly.
+    scores: Annotated[list[IngestScore], Field(max_length=MAX_SCORES_PER_BATCH)] = Field(
+        default_factory=list
+    )
+
     # Also arrives as the X-SDK-Version header; the body copy is a fallback for
     # transports that cannot set headers cleanly. The header wins in the router.
     sdk_version: str | None = None
@@ -306,7 +445,7 @@ class IngestBatch(BaseModel):
         if not isinstance(data, dict):
             return data
 
-        recognised = [key for key in ("events", "traces", "observations") if key in data]
+        recognised = [key for key in ("events", "traces", "observations", "scores") if key in data]
         if not recognised:
             raise ValueError(
                 "Request body must contain 'events' (flat) or 'traces' (nested). "
@@ -319,15 +458,19 @@ class IngestBatch(BaseModel):
 
         traces: list[Any] = list(data.get("traces") or [])
         observations: list[Any] = list(data.get("observations") or [])
+        scores: list[Any] = list(data.get("scores") or [])
         for event in events:
             if not isinstance(event, dict):
                 continue
-            if event.get("type") == TRACE_EVENT_TYPE:
+            kind = event.get("type")
+            if kind == TRACE_EVENT_TYPE:
                 traces.append(event)
+            elif kind == SCORE_EVENT_TYPE:
+                scores.append(event)
             else:
                 observations.append(event)
 
-        return {**data, "traces": traces, "observations": observations}
+        return {**data, "traces": traces, "observations": observations, "scores": scores}
 
     @model_validator(mode="after")
     def _backfill_flat_observations(self) -> "IngestBatch":
@@ -365,6 +508,7 @@ class IngestAccepted(BaseModel):
 
     accepted_traces: int
     accepted_observations: int
+    accepted_scores: int = 0
 
     # Observations dropped because started_at fell outside the retention window
     # the observations table is partitioned for. Non-zero is not a request
@@ -373,3 +517,6 @@ class IngestAccepted(BaseModel):
     # retry. Retrying an out-of-window event cannot succeed; it only ages
     # further out of range.
     rejected_observations: int = 0
+    # Scores dropped for naming neither a trace nor an observation. Nothing to
+    # retry: the client never said what it was scoring.
+    rejected_scores: int = 0

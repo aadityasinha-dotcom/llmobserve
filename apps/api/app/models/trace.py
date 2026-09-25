@@ -2,8 +2,8 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import ForeignKey, Index, PrimaryKeyConstraint, String, text
-from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy import ForeignKey, Index, PrimaryKeyConstraint, String, Text, text
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.dialects.postgresql import UUID as PgUUID
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.types import TIMESTAMP
@@ -52,6 +52,16 @@ class Trace(Base):
     # The customer's own end-user identifier, not a user of this platform.
     user_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     session_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+
+    # Attribution. Free-form labels for slicing (feature, tenant, experiment
+    # arm), and where the run happened, so a regression can be pinned to a
+    # deploy. All client-supplied; the SDK stamps environment/release from its
+    # own configuration.
+    tags: Mapped[list[str]] = mapped_column(
+        ARRAY(Text), nullable=False, server_default=text("'{}'::text[]")
+    )
+    environment: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    release: Mapped[str | None] = mapped_column(String(128), nullable=True)
 
     trace_metadata: Mapped[dict[str, Any]] = mapped_column(
         "metadata", JSONB, nullable=False, server_default=text("'{}'::jsonb")

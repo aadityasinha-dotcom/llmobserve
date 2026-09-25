@@ -29,15 +29,16 @@ from typing import Annotated, Any, cast
 from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Query, status
-from sqlalchemy import Select, Table, func, literal, select, tuple_
+from sqlalchemy import Select, Table, false, func, literal, or_, select, tuple_
 from sqlalchemy.dialects.postgresql import UUID as PgUUID
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.types import TIMESTAMP
 
 from app.deps import RequireRead, TenantSession
-from app.models import Observation, Trace
+from app.models import Observation, Score, Trace
 from app.schemas.traces import (
     ObservationDetail,
+    ScoreDetail,
     TraceDetail,
     TraceListItem,
     TraceListResponse,
@@ -50,6 +51,7 @@ router = APIRouter(prefix="/v1", tags=["traces"])
 
 _traces: Table = cast(Table, Trace.__table__)
 _observations: Table = cast(Table, Observation.__table__)
+_scores: Table = cast(Table, Score.__table__)
 
 DEFAULT_LIMIT = 50
 # The dashboard's own proxy clamps to 200; matching it here means a caller that
@@ -62,6 +64,9 @@ _LIST_COLUMNS = (
     _traces.c.name,
     _traces.c.user_id,
     _traces.c.session_id,
+    _traces.c.tags,
+    _traces.c.environment,
+    _traces.c.release,
     _traces.c["metadata"],
     _traces.c.started_at,
     _traces.c.ended_at,
@@ -171,6 +176,9 @@ def _item_kwargs(row: Any, aggregate: dict[str, Any] | None) -> dict[str, Any]:
         "name": row.name,
         "user_id": row.user_id,
         "session_id": row.session_id,
+        "tags": list(row.tags or []),
+        "environment": row.environment,
+        "release": row.release,
         "metadata": row._mapping["metadata"],
         "started_at": row.started_at,
         "ended_at": row.ended_at,
@@ -210,6 +218,14 @@ async def list_traces(
     session_id: Annotated[
         str | None, Query(description="Exact match on the client's session id.")
     ] = None,
+    environment: Annotated[
+        str | None, Query(description="Exact match on the deployment environment.")
+    ] = None,
+    release: Annotated[str | None, Query(description="Exact match on the release.")] = None,
+    tag: Annotated[
+        list[str] | None,
+        Query(description="Only traces carrying every one of these tags. Repeatable."),
+    ] = None,
     since: Annotated[
         datetime | None,
         Query(alias="from", description="Only traces with started_at >= this (inclusive)."),
@@ -238,6 +254,13 @@ async def list_traces(
         stmt = stmt.where(_traces.c.user_id == user_id)
     if session_id is not None:
         stmt = stmt.where(_traces.c.session_id == session_id)
+    if environment is not None:
+        stmt = stmt.where(_traces.c.environment == environment)
+    if release is not None:
+        stmt = stmt.where(_traces.c.release == release)
+    if tag:
+        # Array containment, served by the GIN index on tags.
+        stmt = stmt.where(_traces.c.tags.contains(tag))
     since = _as_utc(since)
     until = _as_utc(until)
     if since is not None:
@@ -328,9 +351,13 @@ async def get_trace(trace_id: UUID, session: TenantSession, _scope: RequireRead)
                 _observations.c.output,
                 _observations.c.prompt_tokens,
                 _observations.c.completion_tokens,
+                _observations.c.cached_tokens,
+                _observations.c.reasoning_tokens,
                 _observations.c.total_tokens,
                 _observations.c.cost_usd,
                 _observations.c.latency_ms,
+                _observations.c.prompt_name,
+                _observations.c.prompt_version,
                 _observations.c.level,
                 _observations.c.status_message,
                 _observations.c["metadata"],
@@ -345,6 +372,34 @@ async def get_trace(trace_id: UUID, session: TenantSession, _scope: RequireRead)
         observations = [
             ObservationDetail.model_validate(dict(row._mapping)) for row in observation_rows
         ]
+
+    # Scores name the trace, or one of its observations; a score sent for an
+    # observation alone still belongs on this page. One query, both targets.
+    observation_ids = [o.id for o in observations]
+    score_rows = await session.execute(
+        select(
+            _scores.c.id,
+            _scores.c.trace_id,
+            _scores.c.observation_id,
+            _scores.c.name,
+            _scores.c.data_type,
+            _scores.c.value,
+            _scores.c.value_text,
+            _scores.c.comment,
+            _scores.c.source,
+            _scores.c["metadata"],
+            _scores.c.scored_at,
+            _scores.c.created_at,
+        )
+        .where(
+            or_(
+                _scores.c.trace_id == trace_id,
+                _scores.c.observation_id.in_(observation_ids) if observation_ids else false(),
+            )
+        )
+        .order_by(_scores.c.scored_at.asc(), _scores.c.id.asc())
+    )
+    scores = [ScoreDetail.model_validate(dict(row._mapping)) for row in score_rows]
 
     # Summed here from rows already in hand rather than by a third query.
     kwargs = _item_kwargs(
@@ -362,4 +417,4 @@ async def get_trace(trace_id: UUID, session: TenantSession, _scope: RequireRead)
         if observations
         else None,
     )
-    return TraceDetail(**kwargs, observations=observations)
+    return TraceDetail(**kwargs, observations=observations, scores=scores)

@@ -1,5 +1,5 @@
 .PHONY: dev dev-supabase down logs migrate migrate-remote revision test lint fmt psql shell check-rls \
-        venv serve key local-migrate local-test
+        venv serve key local-migrate local-test openapi
 
 COMPOSE := docker compose
 API := $(COMPOSE) exec -T api
@@ -46,6 +46,11 @@ local-migrate: $(VENV)
 
 local-test: $(VENV)
 	$(LOCAL) ../../$(PY) -m pytest $(ARGS)
+
+# Regenerate apps/api/openapi.json, the contract the SDK repo tests against.
+# Run after any change under app/schemas and commit the result.
+openapi: $(VENV)
+	cd apps/api && ../../$(PY) scripts/export_openapi.py openapi.json
 
 dev:
 	@test -f .env || cp .env.example .env

@@ -412,3 +412,126 @@ async def test_observations_delivered_in_separate_batches_all_remain_visible(
     assert row["observation_count"] == 3
     assert len(observations) == 3, observations
     assert {o["name"] for o in observations} == {"step-0", "step-1", "step-2"}
+
+
+# --------------------------------------------------------------------------
+# Attribution, token detail and scores on the read side
+# --------------------------------------------------------------------------
+
+
+async def test_list_carries_attribution_and_filters_on_it(
+    client: AsyncClient, tenants: tuple[Tenant, Tenant]
+) -> None:
+    a, _ = tenants
+    now = datetime.now(UTC)
+    prod = await _insert_trace(a.project_id, name="prod-run", started_at=now)
+    staging = await _insert_trace(a.project_id, name="staging-run", started_at=now)
+    async with tenant_session(a.project_id) as session:
+        await session.execute(
+            text(
+                "UPDATE traces SET tags = ARRAY['beta','qa']::text[], environment = 'prod', "
+                "release = 'r1' WHERE id = :p"
+            ),
+            {"p": prod},
+        )
+        await session.execute(
+            text("UPDATE traces SET environment = 'staging' WHERE id = :s"), {"s": staging}
+        )
+
+    response = await client.get("/v1/traces", headers=a.headers)
+    assert response.status_code == 200
+    by_id = {item["id"]: item for item in response.json()["data"]}
+    assert by_id[str(prod)]["tags"] == ["beta", "qa"]
+    assert by_id[str(prod)]["environment"] == "prod"
+    assert by_id[str(prod)]["release"] == "r1"
+    assert by_id[str(staging)]["tags"] == [], "always a list, never null"
+
+    filtered = await client.get("/v1/traces", params={"environment": "prod"}, headers=a.headers)
+    assert [t["id"] for t in filtered.json()["data"]] == [str(prod)]
+
+    tagged = await client.get(
+        "/v1/traces", params=[("tag", "beta"), ("tag", "qa")], headers=a.headers
+    )
+    assert [t["id"] for t in tagged.json()["data"]] == [str(prod)]
+
+    missing = await client.get("/v1/traces", params={"tag": "nope"}, headers=a.headers)
+    assert missing.json()["data"] == []
+
+
+async def test_detail_carries_token_detail_prompt_version_and_scores(
+    client: AsyncClient, tenants: tuple[Tenant, Tenant]
+) -> None:
+    a, _ = tenants
+    now = datetime.now(UTC)
+    trace_id = await _insert_trace(a.project_id, started_at=now)
+    obs = await _insert_observation(a.project_id, trace_id, started_at=now, prompt_tokens=10)
+    async with tenant_session(a.project_id) as session:
+        await session.execute(
+            text(
+                "UPDATE observations SET cached_tokens = 8, reasoning_tokens = 2, "
+                "prompt_name = 'qa', prompt_version = '3' WHERE id = :o"
+            ),
+            {"o": obs},
+        )
+        await session.execute(
+            text(
+                "INSERT INTO scores (id, project_id, trace_id, name, data_type, value, source, "
+                "scored_at) VALUES (:i1, :p, :t, 'thumbs', 'boolean', 1, 'human', :when)"
+            ),
+            {"i1": uuid4(), "p": a.project_id, "t": trace_id, "when": now},
+        )
+        await session.execute(
+            text(
+                "INSERT INTO scores (id, project_id, observation_id, name, data_type, "
+                "value_text, source, scored_at) "
+                "VALUES (:i2, :p, :o, 'category', 'categorical', 'billing', 'heuristic', :when)"
+            ),
+            {"i2": uuid4(), "p": a.project_id, "o": obs, "when": now + timedelta(seconds=1)},
+        )
+
+    response = await client.get(f"/v1/traces/{trace_id}", headers=a.headers)
+    assert response.status_code == 200
+    body = response.json()
+
+    (observation,) = body["observations"]
+    assert observation["cached_tokens"] == 8
+    assert observation["reasoning_tokens"] == 2
+    assert observation["prompt_name"] == "qa"
+    assert observation["prompt_version"] == "3"
+
+    names = [s["name"] for s in body["scores"]]
+    assert names == ["thumbs", "category"], "trace-level and observation-level, oldest first"
+    assert body["scores"][0]["value"] == "1.000000"
+    assert body["scores"][1]["value_text"] == "billing"
+    assert body["scores"][1]["observation_id"] == str(obs)
+
+
+async def test_scores_do_not_leak_across_tenants(
+    client: AsyncClient, tenants: tuple[Tenant, Tenant]
+) -> None:
+    a, b = tenants
+    now = datetime.now(UTC)
+    trace_a = await _insert_trace(a.project_id, started_at=now)
+    trace_b = await _insert_trace(b.project_id, started_at=now)
+    async with tenant_session(b.project_id) as session:
+        await session.execute(
+            text(
+                "INSERT INTO scores (id, project_id, trace_id, name, data_type, value, source, "
+                "scored_at) VALUES (:i, :p, :t, 'secret', 'numeric', 5, 'human', :when)"
+            ),
+            {"i": uuid4(), "p": b.project_id, "t": trace_b, "when": now},
+        )
+
+    # Even a score that names A's trace id is invisible if B wrote it.
+    async with tenant_session(b.project_id) as session:
+        await session.execute(
+            text(
+                "INSERT INTO scores (id, project_id, trace_id, name, data_type, value, source, "
+                "scored_at) VALUES (:i, :p, :t, 'planted', 'numeric', 5, 'human', :when)"
+            ),
+            {"i": uuid4(), "p": b.project_id, "t": trace_a, "when": now},
+        )
+
+    response = await client.get(f"/v1/traces/{trace_a}", headers=a.headers)
+    assert response.status_code == 200
+    assert response.json()["scores"] == []

@@ -23,17 +23,18 @@ from typing import Any, cast
 from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, status
-from sqlalchemy import Table, func
+from sqlalchemy import Table, func, literal_column
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
 from app.deps import CurrentProjectId, RequireIngest, SdkVersion, TenantSession
-from app.models import Observation, Trace
+from app.models import SCORE_BOOLEAN, SCORE_CATEGORICAL, SCORE_NUMERIC, Observation, Score, Trace
 from app.schemas.ingest import (
     IngestAccepted,
     IngestBatch,
     IngestObservation,
+    IngestScore,
     IngestTrace,
 )
 from app.services.pricing import compute_cost_usd
@@ -48,9 +49,10 @@ router = APIRouter(prefix="/v1", tags=["ingest"])
 # names, so there is no unit of work to involve and no identity map to populate.
 _traces: Table = cast(Table, Trace.__table__)
 _observations: Table = cast(Table, Observation.__table__)
+_scores: Table = cast(Table, Score.__table__)
 
 # Rows per INSERT. Postgres caps a statement at 65535 bind parameters; the widest
-# row here is an observation at 19 columns, so 500 rows is ~9.5k parameters -
+# row here is an observation at 23 columns, so 500 rows is ~11.5k parameters -
 # comfortably clear, while still collapsing a large batch into a handful of
 # round trips.
 _CHUNK_ROWS = 500
@@ -84,6 +86,9 @@ def _trace_row(
         "name": trace.name,
         "user_id": trace.user_id,
         "session_id": trace.session_id,
+        "tags": trace.tags,
+        "environment": trace.environment,
+        "release": trace.release,
         "metadata": trace.metadata,
         "started_at": trace.started_at,
         "ended_at": trace.ended_at,
@@ -185,9 +190,16 @@ def _observation_rows(
                 "output": obs.output,
                 "prompt_tokens": obs.prompt_tokens,
                 "completion_tokens": obs.completion_tokens,
-                # Frozen here. Never recomputed on read.
-                "cost_usd": compute_cost_usd(obs.model, obs.prompt_tokens, obs.completion_tokens),
+                "cached_tokens": obs.cached_tokens,
+                "reasoning_tokens": obs.reasoning_tokens,
+                # Frozen here. Never recomputed on read. The cached subset is
+                # what lets this be right for cached traffic.
+                "cost_usd": compute_cost_usd(
+                    obs.model, obs.prompt_tokens, obs.completion_tokens, obs.cached_tokens
+                ),
                 "latency_ms": obs.latency_ms,
+                "prompt_name": obs.prompt_name,
+                "prompt_version": obs.prompt_version,
                 "level": obs.level,
                 "status_message": obs.status_message,
                 "metadata": obs.metadata,
@@ -200,6 +212,66 @@ def _observation_rows(
         # database for authorship.
 
     return rows, windows, orphan_ids, rejected
+
+
+def _score_value(value: bool | int | float | str) -> tuple[str, Any, str | None]:
+    """Split a wire value into (data_type, numeric value, label).
+
+    bool is checked first because it is an int subclass: `True` must land as a
+    boolean 1, not as the numeric 1 that would make "thumbs" and "rating"
+    indistinguishable on the dashboard.
+    """
+    if isinstance(value, bool):
+        return SCORE_BOOLEAN, (1 if value else 0), None
+    if isinstance(value, (int, float)):
+        return SCORE_NUMERIC, value, None
+    return SCORE_CATEGORICAL, None, value
+
+
+def _score_rows(
+    scores: Sequence[IngestScore], project_id: UUID, received_at: datetime
+) -> tuple[list[dict[str, Any]], int]:
+    """Rows for the scores table, and the count dropped for having no target."""
+    rows: list[dict[str, Any]] = []
+    rejected = 0
+    for score in scores:
+        if not score.has_target:
+            # Nothing it could be attached to, and nothing a retry could fix.
+            rejected += 1
+            continue
+        data_type, numeric, label = _score_value(score.value)
+        rows.append(
+            {
+                "id": score.id,
+                "project_id": project_id,
+                "trace_id": score.trace_id,
+                "observation_id": score.observation_id,
+                "name": score.name,
+                "data_type": data_type,
+                "value": numeric,
+                "value_text": label,
+                "comment": score.comment,
+                "source": score.source,
+                "metadata": score.metadata,
+                "scored_at": score.scored_at or received_at,
+            }
+        )
+    return rows, rejected
+
+
+async def _insert_scores(session: AsyncSession, rows: Sequence[dict[str, Any]]) -> None:
+    """Insert scores, dropping exact repeats.
+
+    DO NOTHING, as for observations: a score records a judgement already made.
+    No target check against traces or observations - a score may arrive before
+    the batch carrying its subject, and it must be kept for when that lands.
+    """
+    if not rows:
+        return
+
+    for chunk in _chunked(rows, _CHUNK_ROWS):
+        stmt = pg_insert(_scores).values(list(chunk))
+        await session.execute(stmt.on_conflict_do_nothing(index_elements=["project_id", "id"]))
 
 
 async def _upsert_traces(session: AsyncSession, rows: Sequence[dict[str, Any]]) -> None:
@@ -233,6 +305,15 @@ async def _upsert_traces(session: AsyncSession, rows: Sequence[dict[str, Any]]) 
                     "name": func.coalesce(excluded.name, _traces.c.name),
                     "user_id": func.coalesce(excluded.user_id, _traces.c.user_id),
                     "session_id": func.coalesce(excluded.session_id, _traces.c.session_id),
+                    "environment": func.coalesce(excluded.environment, _traces.c.environment),
+                    "release": func.coalesce(excluded.release, _traces.c.release),
+                    # An empty tag list is "nothing to say", not "clear them":
+                    # the SDK sends the trace at start and again at end, and
+                    # tags added in between must survive the second write.
+                    "tags": func.coalesce(
+                        func.nullif(excluded.tags, literal_column("'{}'::text[]")),
+                        _traces.c.tags,
+                    ),
                     # Key-wise merge, so a later partial batch enriches the
                     # metadata already stored instead of replacing it.
                     "metadata": _traces.c["metadata"].op("||")(excluded["metadata"]),
@@ -353,7 +434,7 @@ async def _insert_observations(session: AsyncSession, rows: Sequence[dict[str, A
     "/ingest",
     response_model=IngestAccepted,
     status_code=status.HTTP_202_ACCEPTED,
-    summary="Ingest a batch of traces and observations",
+    summary="Ingest a batch of traces, observations and scores",
     responses={
         401: {"description": "Missing, unrecognised, or revoked API key"},
         403: {"description": "Key lacks the 'ingest' scope"},
@@ -413,6 +494,7 @@ async def ingest(
     effective_sdk_version = sdk_version or batch.sdk_version
 
     observation_rows, windows, orphan_ids, rejected = _observation_rows(batch, project_id)
+    score_rows, rejected_scores = _score_rows(batch.scores, project_id, datetime.now(UTC))
     trace_rows = [
         _trace_row(trace, project_id, effective_sdk_version, windows.get(trace.id))
         for trace in batch.traces
@@ -425,14 +507,18 @@ async def ingest(
     await _upsert_traces(session, trace_rows)
     await _insert_stub_traces(session, project_id, orphan_windows)
     await _insert_observations(session, observation_rows)
+    await _insert_scores(session, score_rows)
 
     logger.info(
-        "ingest accepted project=%s traces=%d observations=%d stubs=%d rejected=%d sdk=%s",
+        "ingest accepted project=%s traces=%d observations=%d scores=%d stubs=%d "
+        "rejected=%d rejected_scores=%d sdk=%s",
         project_id,
         trace_count,
         len(observation_rows),
+        len(score_rows),
         len(orphan_windows),
         rejected,
+        rejected_scores,
         effective_sdk_version or "unknown",
     )
     if rejected:
@@ -451,5 +537,7 @@ async def ingest(
     return IngestAccepted(
         accepted_traces=trace_count,
         accepted_observations=len(observation_rows),
+        accepted_scores=len(score_rows),
         rejected_observations=rejected,
+        rejected_scores=rejected_scores,
     )

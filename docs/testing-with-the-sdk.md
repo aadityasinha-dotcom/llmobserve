@@ -274,8 +274,12 @@ optional.
 ```jsonc
 // Flat — one stream, discriminated by `type`
 {"events": [
-  {"id": "…", "type": "trace", "name": "request", "start_time": "…"},
-  {"id": "…", "type": "generation", "trace_id": "…", "parent_id": "…", "status": "ok"}
+  {"id": "…", "type": "trace", "name": "request", "start_time": "…",
+   "user_id": "…", "session_id": "…", "tags": ["qa"], "environment": "prod", "release": "…"},
+  {"id": "…", "type": "generation", "trace_id": "…", "parent_id": "…", "status": "ok",
+   "prompt_tokens": 1000, "cached_tokens": 900, "completion_tokens": 100, "reasoning_tokens": 40,
+   "prompt_name": "qa", "prompt_version": "3"},
+  {"id": "…", "type": "score", "trace_id": "…", "name": "thumbs", "value": true, "source": "human"}
 ]}
 
 // Nested — observations carried inside their trace
@@ -297,7 +301,22 @@ Field mappings that are easy to miss:
 | `parent_id` | `parent_observation_id` |
 | `start_time` / `end_time` | `started_at` / `ended_at` |
 | `input_tokens` / `gen_ai.usage.input_tokens` | `prompt_tokens` |
+| `cached_tokens` (a subset of `prompt_tokens`) | `cached_tokens`, and a discounted `cost_usd` |
+| `prompt_version: 3` (int) | `prompt_version: "3"` (text) |
+| `tags` (any shape) | trimmed to 32 distinct non-empty strings |
+| score `value` (`true` / `0.875` / `"billing"`) | `data_type` + `value` (numeric, booleans as 1/0) or `value_text` |
+| score `timestamp` | `scored_at` |
 | `latency_ms: 50.4779…` (float) | rounded to `50` |
+
+A `score` event names a `trace_id`, an `observation_id`, or both. One that
+names neither is dropped and counted in `rejected_scores`; the rest of the batch
+is unaffected. Scores carry no foreign key to their subject, so one may arrive
+before the batch that carries its trace.
+
+`prompt_tokens` is always the **whole** prompt and `cached_tokens` the part the
+provider served from its cache. The SDK normalises Anthropic, which reports the
+two the other way round, so the server never has to know which provider a row
+came from to price it.
 
 Numeric fields accept any JSON number and are stored as rounded non-negative
 integers. `openapi.json` publishes them as `number` rather than `integer` for
@@ -306,7 +325,22 @@ sends fractional milliseconds.
 
 `cost_usd` is **never** read from the payload. It is computed server-side at
 write time from the token counts and the pricebook in `app/services/pricing.py`,
-then frozen. A client that sends `cost_usd` has it silently dropped.
+then frozen. A client that sends `cost_usd` has it silently dropped. Cached
+tokens bill at the model's cached-input rate where the pricebook lists one, and
+at the full input rate otherwise.
+
+### The published contract
+
+`apps/api/openapi.json` is generated from the request and response schemas and
+committed. Regenerate it after any change under `app/schemas/`:
+
+```bash
+make openapi
+```
+
+The SDK repo's `tests/test_contract.py` validates its payloads against this
+file, so a schema change that is not reflected here breaks the SDK's CI - which
+is the point.
 
 ### Idempotency requires a client timestamp
 
@@ -329,7 +363,8 @@ make test                                         # Docker equivalent
 | File | Covers |
 |---|---|
 | `test_pricing.py` | Pricebook resolution and cost arithmetic. No database. |
-| `test_ingest.py` | Round trip, idempotency, out-of-order delivery, partition window, envelopes. |
+| `test_ingest.py` | Round trip, idempotency, out-of-order delivery, partition window, envelopes, attribution, scores. |
+| `test_traces_read.py` | Paging, aggregates, filters, token detail and scores on the detail view. |
 | `test_tenant_isolation.py` | Project A cannot read project B's traces. |
 
 These run against a **real** Postgres, deliberately — the isolation property is

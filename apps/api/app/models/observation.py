@@ -81,6 +81,12 @@ class Observation(Base):
 
     prompt_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
     completion_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Subsets of the two counts above, not additions to them. prompt_tokens is
+    # always the whole prompt and cached_tokens the part served from the
+    # provider's prompt cache; the SDK normalises providers that report it the
+    # other way round. Priced separately - see services/pricing.py.
+    cached_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    reasoning_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
     # Generated column: derived in the database so no writer can disagree with
     # the parts it was derived from.
     total_tokens: Mapped[int | None] = mapped_column(
@@ -94,6 +100,11 @@ class Observation(Base):
     cost_usd: Mapped[Decimal | None] = mapped_column(Numeric(18, 8), nullable=True)
 
     latency_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+    # Which prompt template produced this call, so cost and quality can be
+    # compared across versions. Free text; the prompts table is a later phase.
+    prompt_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    prompt_version: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
     level: Mapped[str | None] = mapped_column(String(16), nullable=True)
     status_message: Mapped[str | None] = mapped_column(String(1024), nullable=True)

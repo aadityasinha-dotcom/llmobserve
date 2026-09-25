@@ -53,7 +53,9 @@ async def test_batch_is_accepted_and_counted(
     assert response.json() == {
         "accepted_traces": 2,
         "accepted_observations": 1,
+        "accepted_scores": 0,
         "rejected_observations": 0,
+        "rejected_scores": 0,
     }
 
 
@@ -436,7 +438,9 @@ async def test_out_of_window_observations_are_rejected_individually(
     assert response.json() == {
         "accepted_traces": 1,
         "accepted_observations": 1,
+        "accepted_scores": 0,
         "rejected_observations": 2,
+        "rejected_scores": 0,
     }
 
     assert (
@@ -629,7 +633,9 @@ async def test_flat_events_envelope_is_accepted(
     assert response.json() == {
         "accepted_traces": 1,
         "accepted_observations": 1,
+        "accepted_scores": 0,
         "rejected_observations": 0,
+        "rejected_scores": 0,
     }
 
     async with tenant_session(a.project_id) as session:
@@ -846,3 +852,259 @@ async def test_an_observation_without_a_timestamp_cannot_deduplicate(
         assert (await client.post("/v1/ingest", json=body, headers=a.headers)).status_code == 202
 
     assert await _scalar(a.project_id, "SELECT count(*) FROM observations") == 2
+
+
+# --------------------------------------------------------------------------
+# Attribution, token detail, and scores (llm-metrics 0.1.0)
+# --------------------------------------------------------------------------
+
+
+async def test_attribution_fields_land_on_the_trace(
+    tenants: tuple[Tenant, Tenant], client: AsyncClient
+) -> None:
+    a, _ = tenants
+    trace_id = uuid4()
+
+    response = await client.post(
+        "/v1/ingest",
+        json={
+            "events": [
+                {
+                    "id": str(trace_id),
+                    "type": "trace",
+                    "name": "answer",
+                    "user_id": "u-1",
+                    "session_id": "s-1",
+                    "tags": ["qa", " beta ", "qa", 42],
+                    "environment": "prod",
+                    "release": "3191d7d",
+                    "start_time": _now().isoformat(),
+                }
+            ]
+        },
+        headers=a.headers,
+    )
+    assert response.status_code == 202
+
+    async with tenant_session(a.project_id) as session:
+        row = (
+            await session.execute(
+                text("SELECT tags, environment, release FROM traces WHERE id = :t"),
+                {"t": trace_id},
+            )
+        ).first()
+    assert row is not None
+    assert row[0] == ["qa", "beta"], "trimmed, de-duplicated, non-strings dropped"
+    assert row[1] == "prod"
+    assert row[2] == "3191d7d"
+
+
+async def test_a_later_batch_does_not_clear_tags(
+    tenants: tuple[Tenant, Tenant], client: AsyncClient
+) -> None:
+    """The SDK sends a trace at start and again at end. Tags set in between
+    arrive on the second send; a third send with none must keep them."""
+    a, _ = tenants
+    trace_id = uuid4()
+    t0 = _now().isoformat()
+    base = {"id": str(trace_id), "type": "trace", "name": "t", "start_time": t0}
+
+    for payload in (
+        {**base, "tags": ["beta"], "environment": "prod"},
+        {**base, "tags": [], "end_time": t0},
+    ):
+        response = await client.post("/v1/ingest", json={"events": [payload]}, headers=a.headers)
+        assert response.status_code == 202
+
+    async with tenant_session(a.project_id) as session:
+        row = (
+            await session.execute(
+                text("SELECT tags, environment, ended_at FROM traces WHERE id = :t"),
+                {"t": trace_id},
+            )
+        ).first()
+    assert row is not None
+    assert row[0] == ["beta"]
+    assert row[1] == "prod"
+    assert row[2] is not None, "the second send still closed the trace"
+
+
+async def test_token_detail_lands_and_discounts_cached_tokens(
+    tenants: tuple[Tenant, Tenant], client: AsyncClient
+) -> None:
+    """cached_tokens is a subset of prompt_tokens, priced at the cached rate."""
+    a, _ = tenants
+    obs_id = uuid4()
+    t0 = _now().isoformat()
+
+    response = await client.post(
+        "/v1/ingest",
+        json={
+            "events": [
+                {
+                    "id": str(obs_id),
+                    "type": "generation",
+                    "trace_id": str(uuid4()),
+                    "model": "gpt-4o",
+                    "prompt_tokens": 1000,
+                    "completion_tokens": 100,
+                    "cached_tokens": 900,
+                    "reasoning_tokens": 40,
+                    "prompt_name": "qa",
+                    "prompt_version": 3,
+                    "start_time": t0,
+                }
+            ]
+        },
+        headers=a.headers,
+    )
+    assert response.status_code == 202
+
+    async with tenant_session(a.project_id) as session:
+        row = (
+            await session.execute(
+                text(
+                    "SELECT cached_tokens, reasoning_tokens, prompt_name, prompt_version, "
+                    "cost_usd, total_tokens FROM observations WHERE id = :i"
+                ),
+                {"i": obs_id},
+            )
+        ).first()
+    assert row is not None
+    cached, reasoning, prompt_name, prompt_version, cost, total = row
+    assert (cached, reasoning) == (900, 40)
+    assert (prompt_name, prompt_version) == ("qa", "3"), "versions are stored as text"
+    # 100 fresh @ $2.50 + 900 cached @ $1.25 + 100 out @ $10, per million.
+    assert cost == Decimal("0.00237500")
+    assert total == 1100, "total_tokens is unchanged; the detail is a subset"
+
+
+async def test_scores_are_stored_by_type(
+    tenants: tuple[Tenant, Tenant], client: AsyncClient
+) -> None:
+    a, _ = tenants
+    trace_id, obs_id = uuid4(), uuid4()
+    t0 = _now()
+    scores = [
+        {
+            "id": str(uuid4()),
+            "type": "score",
+            "trace_id": str(trace_id),
+            "name": "thumbs",
+            "value": True,
+            "source": "human",
+            "timestamp": t0.isoformat(),
+        },
+        {
+            "id": str(uuid4()),
+            "type": "score",
+            "trace_id": str(trace_id),
+            "observation_id": str(obs_id),
+            "name": "faithfulness",
+            "value": 0.875,
+            "source": "llm_judge",
+            "comment": "cites the doc",
+        },
+        {
+            "id": str(uuid4()),
+            "type": "score",
+            "observation_id": str(obs_id),
+            "name": "category",
+            "value": "billing",
+            "source": "heuristic",
+        },
+        # An unknown source from a newer SDK is stored, not refused.
+        {
+            "id": str(uuid4()),
+            "type": "score",
+            "trace_id": str(trace_id),
+            "name": "x",
+            "value": 1,
+            "source": "future_source",
+        },
+    ]
+
+    response = await client.post("/v1/ingest", json={"events": scores}, headers=a.headers)
+    assert response.status_code == 202
+    body = response.json()
+    assert body["accepted_scores"] == 4
+    assert body["rejected_scores"] == 0
+
+    async with tenant_session(a.project_id) as session:
+        rows = (
+            await session.execute(
+                text(
+                    "SELECT name, data_type, value, value_text, source, comment, scored_at "
+                    "FROM scores WHERE trace_id = :t OR observation_id = :o ORDER BY name"
+                ),
+                {"t": trace_id, "o": obs_id},
+            )
+        ).all()
+
+    by_name = {r[0]: r for r in rows}
+    assert set(by_name) == {"thumbs", "faithfulness", "category", "x"}
+    assert by_name["thumbs"][1:4] == ("boolean", Decimal("1"), None)
+    assert by_name["thumbs"][6] == t0, "the client's own timestamp is kept"
+    assert by_name["faithfulness"][1:4] == ("numeric", Decimal("0.875"), None)
+    assert by_name["faithfulness"][5] == "cites the doc"
+    assert by_name["category"][1:4] == ("categorical", None, "billing")
+    assert by_name["x"][4] == "future_source"
+
+
+async def test_a_score_with_no_target_is_dropped_not_rejected(
+    tenants: tuple[Tenant, Tenant], client: AsyncClient
+) -> None:
+    a, _ = tenants
+    response = await client.post(
+        "/v1/ingest",
+        json={
+            "events": [
+                {"id": str(uuid4()), "type": "score", "name": "orphan", "value": 1},
+                {
+                    "id": str(uuid4()),
+                    "type": "score",
+                    "trace_id": str(uuid4()),
+                    "name": "kept",
+                    "value": 1,
+                },
+            ]
+        },
+        headers=a.headers,
+    )
+    assert response.status_code == 202, "one unusable score must not cost the batch"
+    body = response.json()
+    assert body["accepted_scores"] == 1
+    assert body["rejected_scores"] == 1
+
+
+async def test_replaying_scores_creates_no_duplicates(
+    tenants: tuple[Tenant, Tenant], client: AsyncClient
+) -> None:
+    a, _ = tenants
+    trace_id = uuid4()
+    batch = {
+        "scores": [{"id": str(uuid4()), "trace_id": str(trace_id), "name": "thumbs", "value": -1}]
+    }
+    for _ in range(3):
+        assert (await client.post("/v1/ingest", json=batch, headers=a.headers)).status_code == 202
+
+    count = await _scalar(
+        a.project_id, "SELECT count(*) FROM scores WHERE trace_id = :t", t=trace_id
+    )
+    assert count == 1
+
+
+async def test_a_score_may_arrive_before_its_trace(
+    tenants: tuple[Tenant, Tenant], client: AsyncClient
+) -> None:
+    """No foreign key: the subject may still be in flight."""
+    a, _ = tenants
+    trace_id = uuid4()
+    response = await client.post(
+        "/v1/ingest",
+        json={"scores": [{"id": str(uuid4()), "trace_id": str(trace_id), "name": "q", "value": 1}]},
+        headers=a.headers,
+    )
+    assert response.status_code == 202
+    assert response.json()["accepted_scores"] == 1
+    assert await _scalar(a.project_id, "SELECT count(*) FROM traces WHERE id = :t", t=trace_id) == 0

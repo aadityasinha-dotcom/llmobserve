@@ -18,9 +18,17 @@ code here.
 
 ## Current phase
 
-Building the minimum ingest path so the SDK can be tested end to end. In scope
-right now: auth, POST /v1/ingest, persistence. Evals, dashboard, and metrics
-come after. Do not scaffold apps/worker or apps/web yet.
+The end-to-end loop is built and deployed: the SDK ingests into the API on
+Vercel, Postgres on Supabase stores it under row-level security, and the
+dashboard on Vercel lists traces, shows a trace's span tree, token detail and
+scores, and issues scoped API keys. Sign-in is Google OAuth with per-user
+project membership. See `docs/deploying-to-vercel.md` and
+`docs/google-sign-in.md` for the live setup.
+
+Next is the eval path: `apps/worker` (arq) consuming a queue the API enqueues
+to, scorers writing `scores`, and metrics aggregation for the dashboard. None
+of that is started. Do not scaffold `apps/worker` until the queue contract is
+designed; the dashboard's own rules are in `apps/web/CLAUDE.md`.
 
 ## Non-negotiable design rules
 
@@ -119,20 +127,25 @@ make local-migrate     # alembic upgrade head
 make local-test        # pytest   (ARGS="tests/test_ingest.py -q")
 ```
 
-## Build order (current phase)
+## Milestones reached
 
-1. `docker-compose.yml` — postgres + redis, nothing else yet
-2. Alembic init + first migration: projects, traces, observations
-3. `app/deps.py` — API key auth, resolves bearer token to project_id
-4. `app/schemas/ingest.py` — Pydantic models for the batch payload
-5. `app/services/pricing.py` — model → cost table, frozen at write
-6. `app/routers/ingest.py` — POST /v1/ingest, batched, idempotent
+1. `docker-compose.yml` — postgres + redis for local runs; Supabase in production
+2. Alembic migrations `0001`–`0009`: projects, traces (day-partitioned
+   observations), api_keys, users, project_members, scores
+3. `app/deps.py` — bearer key or session JWT resolves to a project, with RLS
+   enforced per request and a per-process check that the role cannot bypass it
+4. `app/routers/ingest.py` — POST /v1/ingest, batched, idempotent, cost frozen
+5. `app/routers/traces.py` — GET /v1/traces (keyset cursor) and /v1/traces/{id}
+6. `app/routers/auth.py`, `keys.py` — Google sign-in, sessions, key management
 7. `tests/test_tenant_isolation.py` — project A cannot read project B's traces
-8. Point the SDK at localhost:8000 and confirm a trace lands in Postgres
+8. `apps/web` — trace list and detail, settings, sign-in; deployed on Vercel
+9. The `llm-metrics` SDK sends a real OpenAI / Anthropic call through all of it
 
-Step 8 is the milestone. Everything before it is in service of that.
+Migrations are applied from a developer machine (`make local-migrate`), never
+by a deploy. Run a new one before pushing the code that depends on it.
 
 ## Out of scope for now
 
-Dashboard, eval worker, scorers, metrics aggregation, prompt versioning,
-Cloud Run deploy config. They are in the architecture but not this phase.
+Eval worker and scorers, metrics aggregation and charts, prompt versioning
+(the `prompts` table), Cloud Run deploy config for the worker. They are in the
+architecture but not built, and nothing should pretend they are.

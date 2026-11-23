@@ -120,6 +120,11 @@ Import the **same repo** a second time:
 | Framework Preset | Next.js (auto-detected) |
 | Node.js version | default (22.x) is fine |
 
+`apps/web/vercel.json` pins the dashboard's server functions to **`bom1`** as
+well. Every page render calls the API, so a dashboard left in the default
+`iad1` pays a Washington-to-Mumbai round trip per request on top of the API's
+own query time.
+
 ### Environment variables (Production)
 
 | Name | Value |

@@ -19,14 +19,15 @@ class Project(Base):
     )
     name: Mapped[str] = mapped_column(String(255), nullable=False)
 
-    # sha256 hex of the raw key. Raw keys are shown once at creation and never
-    # stored. Unindexed lookups here would be on the request hot path, so this
-    # column carries the unique index that serves authentication.
-    api_key_hash: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    # Keys live in `api_keys` (migration 0006), many per project, each with its
+    # own scopes and revocation. The single-key columns that used to sit here
+    # were dropped in 0009.
 
-    # First few characters of the raw key, for display ("which key is this?").
-    # Not a secret and not sufficient to authenticate.
-    api_key_prefix: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    # The user who created the project through the dashboard (FK to users.id in
+    # the database; `users` has no ORM model because the app role only reads
+    # it through the auth_* functions). NULL for projects issued from
+    # scripts/create_project.py, which are claimed with `--grant`.
+    created_by: Mapped[UUID | None] = mapped_column(PgUUID(as_uuid=True), nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(
         TIMESTAMP(timezone=True), nullable=False, server_default=text("now()")
